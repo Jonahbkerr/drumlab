@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.bench.tsbuildinfo",
+    "types": ["node", "vite/client"],
+    "module": "esnext",
+    "target": "es2023"
+  },
+  "include": ["bench", "src/engine", "src/soundtouch.d.ts"]
+}

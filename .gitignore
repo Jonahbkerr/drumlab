@@ -25,3 +25,4 @@ dist-ssr
 
 # local test material: third-party songs, screenshots (never committed)
 /local/
+.gstack/

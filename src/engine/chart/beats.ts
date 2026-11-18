@@ -3,22 +3,39 @@
  * strong onsets while keeping a steady period, so the grid follows the
  * real track instead of a BPM guessed once and extrapolated.
  */
-import type { Spectrogram } from './spectrum';
 
-export function onsetNovelty(spec: Spectrogram, perc: Float32Array): Float32Array {
-  const { frames, bands, fps } = spec;
-  let max = 0;
-  for (let i = 0; i < perc.length; i++) if (perc[i] > max) max = perc[i];
-  const g = max > 0 ? 1000 / max : 1;
-  const nov = new Float32Array(frames);
+/**
+ * Onset strength from the drum model output plus spectral flux:
+ * positive change per frame, slow trend removed, unit RMS.
+ */
+export function onsetNovelty(
+  act: Float32Array,
+  classes: number,
+  weights: number[],
+  spec: { frames: number; bins: number; data: Float32Array },
+  fps: number,
+): Float32Array {
+  const { frames, bins, data } = spec;
+  const drum = new Float32Array(frames);
+  const flux = new Float32Array(frames);
   for (let f = 1; f < frames; f++) {
+    let d = 0;
+    for (let c = 0; c < classes; c++) d += weights[c] * Math.max(0, act[f * classes + c] - act[(f - 1) * classes + c]);
+    drum[f] = d;
     let s = 0;
-    for (let b = 0; b < bands; b++) {
-      const d = Math.log1p(g * perc[f * bands + b]) - Math.log1p(g * perc[(f - 1) * bands + b]);
-      if (d > 0) s += d;
-    }
-    nov[f] = s;
+    for (let b = 0; b < bins; b++) s += Math.max(0, data[f * bins + b] - data[(f - 1) * bins + b]);
+    flux[f] = s;
   }
+  const norm = (x: Float32Array) => {
+    let sd = 0;
+    for (let f = 0; f < frames; f++) sd += x[f] * x[f];
+    sd = Math.sqrt(sd / Math.max(1, frames)) || 1;
+    for (let f = 0; f < frames; f++) x[f] /= sd;
+  };
+  norm(drum);
+  norm(flux);
+  const nov = new Float32Array(frames);
+  for (let f = 0; f < frames; f++) nov[f] = 2 * drum[f] + flux[f];
   // remove the slowly varying loudness trend, keep the spikes
   const w = Math.round(fps * 0.4);
   const out = new Float32Array(frames);
@@ -32,10 +49,7 @@ export function onsetNovelty(spec: Spectrogram, perc: Float32Array): Float32Arra
     const n = Math.min(frames - 1, hi) - Math.max(0, lo + 1) + 1;
     out[f] = Math.max(0, nov[f] - acc / n);
   }
-  let sd = 0;
-  for (let f = 0; f < frames; f++) sd += out[f] * out[f];
-  sd = Math.sqrt(sd / Math.max(1, frames)) || 1;
-  for (let f = 0; f < frames; f++) out[f] /= sd;
+  norm(out);
   return out;
 }
 
@@ -45,7 +59,7 @@ export function estimatePeriod(nov: Float32Array, fps: number): number {
   const minLag = Math.floor((fps * 60) / 200);
   const maxLag = Math.min(n - 2, Math.ceil((fps * 60) / 55));
   if (maxLag <= minLag) return (fps * 60) / 120;
-  const ac = new Float64Array(maxLag * 3 + 2);
+  const ac = new Float64Array(maxLag * 4 + 2);
   const acAt = (lag: number) => {
     if (lag >= ac.length || lag >= n) return 0;
     if (ac[lag] === 0) {
@@ -59,8 +73,14 @@ export function estimatePeriod(nov: Float32Array, fps: number): number {
   let bestLag = minLag;
   const score = new Float64Array(maxLag + 2);
   for (let lag = minLag; lag <= maxLag; lag++) {
-    // a true beat period also explains its multiples
-    const comb = acAt(lag) + 0.5 * acAt(2 * lag) + 0.33 * acAt(3 * lag) + 0.25 * acAt(4 * lag);
+    // a true beat period also explains its bar-level multiples and its
+    // 8th/16th subdivisions (rejects syncopation periods like dotted 8ths)
+    const comb =
+      acAt(lag) +
+      0.5 * acAt(2 * lag) +
+      0.25 * acAt(4 * lag) +
+      0.5 * acAt(Math.round(lag / 2)) +
+      0.25 * acAt(Math.round(lag / 4));
     const bpm = (60 * fps) / lag;
     const prior = Math.exp(-0.5 * (Math.log2(bpm / 115) / 0.75) ** 2);
     score[lag] = comb * prior;

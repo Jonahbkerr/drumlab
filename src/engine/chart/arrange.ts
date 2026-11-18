@@ -2,7 +2,19 @@
  * Turns raw drum hits into a playable chart: beat grid, per-slot cleanup,
  * difficulty levels and a two-hands rule.
  */
-import type { DrumKind, Hit } from './drums';
+import type { Lane } from '../types';
+
+/** a detected drum hit, before arrangement */
+export interface Hit {
+  t: number;
+  lane: Lane;
+  /** how far the hit stands out above its surroundings (what thresholds apply to) */
+  salience: number;
+  /** model probability at the peak (ghost notes are low) */
+  prob: number;
+  /** salience needed at sensitivity 1 */
+  need: number;
+}
 
 export interface ArrangeOpts {
   /** 1 Easy · 2 Medium · 3 Hard · 4 Full */
@@ -13,8 +25,8 @@ export interface ArrangeOpts {
 
 export interface ChartNote {
   t: number;
-  lane: DrumKind;
-  /** 1 = a normal hit; ghost notes are well below */
+  lane: Lane;
+  /** model probability at the hit (ghost notes are low) */
   strength: number;
 }
 
@@ -65,29 +77,30 @@ export class BeatGrid {
   }
 }
 
-const BASE_THRESHOLD: Record<DrumKind, number> = { kick: 0.3, snare: 0.3, hh: 0.25, crash: 0.35 };
+/** snare hits below this model probability count as ghost notes */
+const GHOST = 0.35;
 
 export function arrange(hits: Hit[], grid: BeatGrid, opts: ArrangeOpts): ChartNote[] {
   const sens = Math.max(0.3, opts.sensitivity);
   // 1. threshold + one note per lane per 16th slot (strongest wins)
   const bySlot = new Map<string, { slot: number; hit: Hit }>();
   for (const h of hits) {
-    if (h.strength < BASE_THRESHOLD[h.lane] / sens) continue;
+    if (h.salience < h.need / sens) continue;
     const slot = grid.slotAt(h.t);
     const key = `${slot}:${h.lane}`;
     const prev = bySlot.get(key);
-    if (!prev || prev.hit.strength < h.strength) bySlot.set(key, { slot, hit: h });
+    if (!prev || prev.hit.salience < h.salience) bySlot.set(key, { slot, hit: h });
   }
-  let notes = [...bySlot.values()].map(({ slot, hit }) => ({ slot, t: hit.t, lane: hit.lane, strength: hit.strength }));
+  let notes = [...bySlot.values()].map(({ slot, hit }) => ({ slot, t: hit.t, lane: hit.lane, strength: hit.prob }));
 
   // 2. difficulty
   const level = Math.round(opts.level);
-  if (level <= 3) notes = notes.filter((n) => !(n.lane === 'snare' && n.strength < 0.45)); // no ghost notes
+  if (level <= 3) notes = notes.filter((n) => !(n.lane === 'snare' && n.strength < GHOST)); // no ghost notes
   if (level <= 2) notes = notes.filter((n) => n.slot % 2 === 0); // 8th-note grid only
   if (level <= 1) notes = notes.filter((n) => n.lane === 'kick' || n.lane === 'snare');
 
-  // 3. two hands: at most two of snare / hat / crash at once (crash > snare > hat)
-  const handRank: Record<DrumKind, number> = { crash: 0, snare: 1, hh: 2, kick: 9 };
+  // 3. two hands: at most two hand drums at once (crash > snare > toms > hat)
+  const handRank: Record<Lane, number> = { crash: 0, snare: 1, tomHi: 2, tomLo: 2, hh: 3, kick: 9 };
   const slots = new Map<number, typeof notes>();
   for (const n of notes) {
     const arr = slots.get(n.slot) ?? [];

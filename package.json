@@ -7,9 +7,12 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "tsc -p tsconfig.bench.json --noEmit && node --import tsx --test bench/charts.test.ts",
+    "bench": "tsx bench/run.ts"
   },
   "dependencies": {
+    "onnxruntime-web": "^1.31.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "soundtouchjs": "^0.3.0"

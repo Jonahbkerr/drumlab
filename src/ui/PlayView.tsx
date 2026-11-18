@@ -30,6 +30,8 @@ export default function PlayView({ lesson, song, onFinish, onQuit }: Props) {
   const engineRef = useRef<GameEngine | null>(null);
   if (!engineRef.current) engineRef.current = new GameEngine();
   const engine = engineRef.current;
+  // dev builds: let automated tests read the clock and playhead
+  if (import.meta.env.DEV) (window as unknown as { __engine?: GameEngine }).__engine = engine;
   if (import.meta.env.DEV) {
     (window as unknown as { __engine?: GameEngine }).__engine = engine;
   }
@@ -41,7 +43,8 @@ export default function PlayView({ lesson, song, onFinish, onQuit }: Props) {
   const [bpmMul, setBpmMul] = useState(1);
   const [speed, setSpeed] = useState(1);
   const [waitMode, setWaitMode] = useState(false);
-  const [metronome, setMetronome] = useState(true);
+  // songs carry their own beat; the click is opt-in there
+  const [metronome, setMetronome] = useState(() => !(!lesson && !!song));
   const [midiStatus, setMidiStatus] = useState('checking MIDI…');
   const [flash, setFlash] = useState({ key: 0, lane: null as Lane | null });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -68,6 +71,7 @@ export default function PlayView({ lesson, song, onFinish, onQuit }: Props) {
     engine.setCalibration(savedCal !== null ? Number(savedCal) : null);
     if (song) engine.loadSong(song.chart, song.buffer, 'performance', { sectionIndex: -1, bpmMul: 1, waitMode: false, speed: 1 });
     else if (lesson) engine.load(lesson, 'performance', { sectionIndex: -1, bpmMul: 1, waitMode: false, speed: 1 });
+    engine.setMetronome(metronome);
     engine.start();
     return () => engine.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -101,7 +101,8 @@ function render(spec: SongSpec): TestSong {
         const t = base + jitter();
         if (h === 'r') ride(drums, t, vel('x') * 0.9, r);
         else hat(drums, t, h === 'X' ? 0.95 : h === 'o' ? 0.8 : 0.62, r, h === 'o', spec.hatBright ?? 1);
-        truth.push({ t, lane: 'hh' });
+        // the app's cymbal lane is crash + ride (a ride pad sends GM 51 → 'crash')
+        truth.push({ t, lane: h === 'r' ? 'crash' : 'hh' });
       }
       const c = at(pat.C);
       if (c !== '.') {

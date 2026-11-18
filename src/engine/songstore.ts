@@ -16,6 +16,8 @@ export interface SongMeta {
   bpm: number;
   durationSec: number;
   noteCount: number;
+  /** charted by the drum model (has tracked beats); older charts should be re-charted */
+  modern: boolean;
 }
 
 const DB_NAME = 'drumlab-db';
@@ -78,6 +80,7 @@ export async function listSongs(): Promise<SongMeta[]> {
               bpm: s.chart.bpm,
               durationSec: s.chart.durationSec,
               noteCount: s.chart.notes.length,
+              modern: Array.isArray(s.chart.beats),
             }))
             .sort((a, b) => b.createdAt - a.createdAt),
         );

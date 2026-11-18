@@ -1,4 +1,4 @@
-import type { Lane } from './types';
+import type { Lane } from '../src/engine/types';
 
 export interface SongChart {
   id: string;

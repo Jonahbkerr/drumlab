@@ -117,6 +117,12 @@ export class GameEngine {
   private waitMode = false;
   private metronome = true;
   private lastBeatInt = -Infinity;
+  /** song mode with tracked beats: count-in + metronome follow the music */
+  private clicks: { t: number; accent: boolean; countIn: boolean }[] = [];
+  private clickIdx = 0;
+  private countInEnd = 0;
+  /** audio-clock time the run was paused at (lessons and count-ins stop their clock) */
+  private pausedAt: number | null = null;
 
   private hits = 0;
   private misses = 0;
@@ -165,10 +171,23 @@ export class GameEngine {
     // Otherwise the highway runs one device-latency ahead of the music
     // (10ms onboard, 100–300ms Bluetooth) and everything feels "off".
     if (this.songMode && this.player && this.phase !== 'countin') {
-      const raw = this.anchor.time + (this.player.position - this.anchorPos);
+      // position is in song seconds; at a practice tempo it advances slower
+      // than real time, so scale back to real seconds (spb = 1 / tempo)
+      const raw = this.anchor.time + (this.player.position - this.anchorPos) * this.spb;
       return Math.max(0, raw - this.calOffset());
     }
-    return this.audio.time() - this.startCtx;
+    return (this.pausedAt ?? this.audio.time()) - this.startCtx;
+  }
+
+  private freezeClock() {
+    this.pausedAt ??= this.audio.time();
+  }
+
+  /** continue the audio-clock timeline from where it was frozen */
+  private unfreezeClock() {
+    if (this.pausedAt === null) return;
+    this.startCtx += this.audio.time() - this.pausedAt;
+    this.pausedAt = null;
   }
 
   /** manual calibration override (seconds); null = use device latency */
@@ -196,12 +215,89 @@ export class GameEngine {
     return noteT;
   }
 
+  private get beatSync(): boolean {
+    return this.songMode && (this.chart?.beats?.length ?? 0) > 8;
+  }
+
+  /**
+   * Clicks on the song's tracked beats: a count-in into the first bar at or
+   * after `from`, then one per beat (accent on bar starts). Returns how long
+   * (song seconds) the count-in must run before `from`.
+   */
+  private prepareClicks(from: number): number {
+    const chart = this.chart!;
+    const beats = chart.beats!;
+    const down = chart.downbeat ?? 0;
+    const p = 60 / chart.bpm;
+    const n = chart.countInBeats;
+    let target = -1;
+    for (let i = down; i < beats.length; i += 4) {
+      if (beats[i] >= from - 0.02) {
+        target = beats[i];
+        break;
+      }
+    }
+    if (target < 0) target = from + n * p;
+    const ticks = Array.from({ length: n }, (_, k) => ({ t: target - (n - k) * p, accent: k === 0, countIn: true }));
+    const music = beats
+      .map((t, i) => ({ t, accent: (((i - down) % 4) + 4) % 4 === 0, countIn: false }))
+      .filter((c) => c.t >= target - 0.02);
+    this.clicks = [...ticks, ...music];
+    this.clickIdx = 0;
+    return Math.max(0, from - ticks[0].t);
+  }
+
+  /** schedule clicks due in the next ~100 ms on the audio clock */
+  private tickClicks() {
+    const pos = this.beatNow();
+    const lag = this.phase === 'playing' ? this.calOffset() : 0;
+    while (this.clickIdx < this.clicks.length) {
+      const c = this.clicks[this.clickIdx];
+      const dt = (c.t - pos) * this.spb - lag; // real seconds until the click must sound
+      if (dt > 0.1) break;
+      this.clickIdx++;
+      if (dt < -0.05) continue; // already past (seek, pause)
+      if (c.countIn || this.metronome) this.audio.click(this.audio.time() + Math.max(0, dt), c.accent);
+    }
+  }
+
+  /** skip clicks before a song position (after loops/seeks) */
+  private seekClicks(pos: number) {
+    this.clickIdx = this.clicks.findIndex((c) => !c.countIn && c.t >= pos - 0.01);
+    if (this.clickIdx < 0) this.clickIdx = this.clicks.length;
+  }
+
+  /** 1–4 while a beat-synced count-in is sounding, else 0 */
+  private syncCount(): number {
+    if (!this.beatSync) return 0;
+    const ticks = this.clicks.filter((c) => c.countIn);
+    if (ticks.length === 0) return 0;
+    const pos = this.beatNow();
+    const p = 60 / (this.chart?.bpm ?? 120);
+    if (pos < ticks[0].t - p * 0.25 || pos >= ticks[ticks.length - 1].t + p) return 0;
+    return Math.max(1, ticks.filter((c) => c.t <= pos + 0.02).length);
+  }
+
   private noteTime(i: number): number {
     return this.anchor.time + (this.notes[i].t - this.anchor.beat) * this.spb;
   }
 
   /** shift anchor so the current position keeps its wall-clock time */
   private reAnchor() {
+    if (this.songMode && this.player && this.phase === 'playing') {
+      // Song clock: move the anchor along the raw playhead. now() and
+      // beatNow() subtract the output latency themselves; folding the
+      // already-compensated position into the anchor would subtract it again
+      // on every pause/resume/tempo change and push the notes later each time.
+      const pos = this.player.position;
+      this.anchor = {
+        beat: this.anchor.beat + (pos - this.anchorPos),
+        musicBeat: this.musicBeatNow(),
+        time: this.anchor.time + (pos - this.anchorPos) * this.spb,
+      };
+      this.anchorPos = pos;
+      return;
+    }
     const t = this.now();
     const beat = this.beatNow();
     const musicBeat = this.musicBeatNow();
@@ -265,6 +361,7 @@ export class GameEngine {
     this.deltas = [];
     this.phase = 'idle';
     this.paused = false;
+    this.pausedAt = null;
     this.waitIdx = -1;
     this.lastBeatInt = -Infinity;
     this.hits = 0;
@@ -297,10 +394,18 @@ export class GameEngine {
     this.audio.ensure();
     this.startCtx = this.audio.time();
     const countInBeats = this.songMode ? this.chart!.countInBeats : this.lesson!.countInBeats;
-    this.anchor = { beat: 0, musicBeat: 0, time: countInBeats * this.clickSpb };
+    if (this.beatSync) {
+      const from = this.section?.start ?? 0;
+      const lead = this.prepareClicks(from);
+      this.countInEnd = from;
+      this.anchor = { beat: from - lead, musicBeat: 0, time: 0 };
+    } else {
+      this.anchor = { beat: 0, musicBeat: 0, time: countInBeats * this.clickSpb };
+    }
     this.anchorPos = 0;
     this.phase = 'countin';
     this.paused = false;
+    this.pausedAt = null;
     this.backingDone = false;
     this.player?.stop();
     this.player = null;
@@ -331,9 +436,11 @@ export class GameEngine {
   }
 
   setBpmMul(m: number) {
+    // anchor first, while the old tempo still describes the time played so far
+    this.reAnchor();
     this.bpmMul = Math.min(1.2, Math.max(0.5, m));
     if (this.player) this.player.setTempo(this.bpmMul);
-    this.reAnchor();
+    if (this.songMode && this.player) this.anchorPos = this.player.position;
   }
 
   setSpeed(s: number) {
@@ -353,6 +460,7 @@ export class GameEngine {
     this.judged = this.notes.map(() => null);
     this.reAnchor();
     if (this.player && this.section) this.player.seek(this.section.start);
+    if (this.beatSync && this.section) this.seekClicks(this.section.start);
     this.pushHud(true);
   }
 
@@ -369,6 +477,7 @@ export class GameEngine {
     if (this.phase !== 'countin' && this.phase !== 'playing') return;
     this.paused = true;
     this.pauseReason = 'user';
+    this.freezeClock();
     if (this.phase === 'playing') this.player?.pause();
     this.pushHud(true);
   }
@@ -377,6 +486,7 @@ export class GameEngine {
     if (!this.paused) return;
     this.paused = false;
     this.waitIdx = -1;
+    this.unfreezeClock();
     this.reAnchor();
     if (this.phase === 'playing') this.player?.resume();
     this.pushHud(true);
@@ -386,7 +496,8 @@ export class GameEngine {
   hit(lane: Lane, vel = 1) {
     if ((!this.lesson && !this.chart) || this.phase === 'idle' || this.phase === 'done') return;
     const now = this.now();
-    this.audio.hit(lane, now, vel);
+    // the pad sound plays right now on the audio clock (now() is the song clock)
+    this.audio.hit(lane, this.audio.time(), vel);
     this.flashTimes[lane] = now;
     this.onFlash(lane);
 
@@ -394,9 +505,16 @@ export class GameEngine {
     if (this.paused) {
       if (this.pauseReason === 'wait' && this.notes[this.waitIdx]?.lane === lane) {
         this.paused = false;
+        this.unfreezeClock();
         const t = this.notes[this.waitIdx].t;
         this.anchor = { beat: t, musicBeat: this.musicBeatFor(t), time: now };
         this.waitIdx = -1;
+        if (this.songMode && this.player) {
+          // restart the music at the note that was waited for
+          this.player.seek(t);
+          this.anchorPos = t;
+          if (this.beatSync) this.seekClicks(t);
+        }
         this.player?.resume();
       } else {
         return;
@@ -495,17 +613,31 @@ export class GameEngine {
     const now = this.now();
 
     if (this.phase === 'countin') {
-      const beat = this.musicBeatNow();
-      this.countInClick(beat, now);
-      if (beat >= 0) {
-        this.phase = 'playing';
-        this.player?.start();
-        this.pushHud(true);
+      if (this.beatSync) {
+        this.tickClicks();
+        if (this.beatNow() >= this.countInEnd) {
+          this.phase = 'playing';
+          if (this.player) {
+            if (this.countInEnd > 0) this.player.seek(this.countInEnd);
+            this.player.start();
+            this.anchorPos = this.player.position;
+          }
+          this.anchor = { beat: this.countInEnd, musicBeat: 0, time: now };
+          this.pushHud(true);
+        }
+      } else {
+        const beat = this.musicBeatNow();
+        this.countInClick(beat, now);
+        if (beat >= 0) {
+          this.phase = 'playing';
+          this.player?.start();
+          this.pushHud(true);
+        }
       }
     } else if (this.phase === 'playing' && !this.paused) {
       this.playSeconds += frameSec;
-      const beat = this.musicBeatNow();
-      this.countInClick(beat, now);
+      if (this.beatSync) this.tickClicks();
+      else this.countInClick(this.musicBeatNow(), now);
 
       // loop jump (practice mode with a section selected)
       if (this.section && this.beatNow() >= this.section.end) {
@@ -521,6 +653,7 @@ export class GameEngine {
         } else {
           this.anchorPos = 0;
         }
+        if (this.beatSync) this.seekClicks(this.section.start);
         this.pushHud(true);
       }
 
@@ -532,6 +665,7 @@ export class GameEngine {
             this.judgeMiss(i);
             this.paused = true;
             this.pauseReason = 'wait';
+            this.freezeClock();
             this.waitIdx = i;
             this.player?.pause();
             this.floats.push({ text: 'WAIT…', color: '#f87171', x: 0.5, at: now });
@@ -599,8 +733,9 @@ export class GameEngine {
         : -1,
       waitMode: this.waitMode,
       metronome: this.metronome,
-      countBeat:
-        this.phase === 'countin'
+      countBeat: this.beatSync
+        ? this.syncCount()
+        : this.phase === 'countin'
           ? Math.max(1, Math.floor(this.musicBeatNow()) + countInBeats + 1)
           : 0,
       lastJudge: null,
@@ -642,6 +777,21 @@ export class GameEngine {
       ctx.moveTo(x, 0);
       ctx.lineTo(x, h);
       ctx.stroke();
+    }
+
+    // beat grid from the song's tracked beats: bar lines brighter
+    if (this.beatSync) {
+      const beats = this.chart!.beats!;
+      const down = this.chart!.downbeat ?? 0;
+      for (let i = 0; i < beats.length; i++) {
+        const t = this.anchor.time + (beats[i] - this.anchor.beat) * this.spb;
+        const y = hitY - (t - now) * pxPerSec;
+        if (y > hitY) continue;
+        if (y < -4) break;
+        const bar = (((i - down) % 4) + 4) % 4 === 0;
+        ctx.fillStyle = bar ? 'rgba(255,255,255,0.17)' : 'rgba(255,255,255,0.06)';
+        ctx.fillRect(0, y - (bar ? 1 : 0.5), w, bar ? 2 : 1);
+      }
     }
 
     // connector glow: lane → pad
@@ -731,10 +881,11 @@ export class GameEngine {
       ctx.globalAlpha = 1;
     }
 
-    // count-in
-    if (this.phase === 'countin') {
+    // count-in (beat-synced songs count in over the intro, into bar 1)
+    const syncK = this.syncCount();
+    if (this.phase === 'countin' || syncK > 0) {
       const countInBeats = this.songMode ? (this.chart?.countInBeats ?? 4) : (this.lesson?.countInBeats ?? 4);
-      const k = Math.min(
+      const k = syncK > 0 ? syncK : Math.min(
         countInBeats,
         Math.max(1, Math.floor(this.musicBeatNow()) + countInBeats + 1),
       );

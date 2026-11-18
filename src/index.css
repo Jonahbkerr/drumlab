@@ -585,7 +585,8 @@ h3 {
   height: 18px;
 }
 
-select.ctl {
+select.ctl,
+input.ctl {
   width: 100%;
   padding: 10px 12px;
   border-radius: 10px;
@@ -818,4 +819,86 @@ select.ctl {
   .hud .spacer {
     display: none;
   }
+}
+
+/* ---------------------------------------------------------- song import */
+.analyze-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.analyze-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.import-error {
+  margin: 12px 0 0;
+  color: var(--red);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.credit {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.old-chart {
+  color: var(--amber);
+  font-weight: 600;
+}
+.chart-preview {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px 12px;
+  overflow-x: auto;
+}
+.chart-preview-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.chart-preview-grid {
+  display: grid;
+  min-width: 420px;
+  row-gap: 3px;
+}
+.chart-preview-row {
+  display: contents;
+}
+.chart-preview-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  align-self: center;
+}
+.chart-preview .cell {
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid transparent;
+}
+.chart-preview .cell.beat {
+  border-left-color: rgba(255, 255, 255, 0.08);
+}
+.chart-preview .cell.bar {
+  border-left-color: rgba(255, 255, 255, 0.28);
+}
+.chart-preview .cell i {
+  display: block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+input.ctl:focus,
+select.ctl:focus {
+  outline: none;
+  border-color: var(--accent);
 }

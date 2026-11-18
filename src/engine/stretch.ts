@@ -139,14 +139,15 @@ export class SongPlayer {
   }
 
   setTempo(r: number) {
-    this.rate = r;
-    if (this.shifter) this.shifter.tempo = r;
     if (this.plain) {
-      // rebase position accounting, keep the stream at the current playhead
+      // rebase position accounting at the OLD rate first (position() uses
+      // this.rate), then switch; otherwise the playhead jumps on every change
       this.posSec = this.position;
       this.anchorCtx = this.ctx.currentTime;
       this.plain.playbackRate.value = r;
     }
+    this.rate = r;
+    if (this.shifter) this.shifter.tempo = r;
   }
 
   stop() {
