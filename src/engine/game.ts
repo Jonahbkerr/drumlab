@@ -74,6 +74,24 @@ interface FloatText {
   at: number;
 }
 
+/** one hit (or miss) animation at a lane's target */
+interface HitEffect {
+  lane: Lane;
+  at: number;
+  judge: Judgement;
+  /** seconds; negative = early */
+  delta: number;
+  seed: number;
+}
+
+const JUDGE_COLOR: Record<Judgement, string> = {
+  perfect: '#ffd166',
+  great: '#4cc9f0',
+  good: '#34d399',
+  miss: '#f87171',
+};
+const EFFECT_LIFE = 0.55;
+
 const HIT_LINE_OFFSET = 148; // px from bottom of canvas
 const PX_PER_BEAT = 170;
 const PX_PER_SEC = 190;
@@ -143,6 +161,10 @@ export class GameEngine {
   private lastHudAt = 0;
 
   private floats: FloatText[] = [];
+  private effects: HitEffect[] = [];
+  private effectSeed = 1;
+  /** last combo milestone shown (every 10) */
+  private comboShown = 0;
   private flashTimes: Partial<Record<Lane, number>> = {};
 
   onHud: (h: Hud) => void = () => {};
@@ -176,7 +198,11 @@ export class GameEngine {
       const raw = this.anchor.time + (this.player.position - this.anchorPos) * this.spb;
       return Math.max(0, raw - this.calOffset());
     }
-    return (this.pausedAt ?? this.audio.time()) - this.startCtx;
+    // Lessons: same idea. Clicks and pad sounds reach the ears one output
+    // latency after they are rendered, so the lesson clock runs that much
+    // behind the render clock (song count-ins stay on the raw clock).
+    const lag = this.songMode ? 0 : this.calOffset();
+    return (this.pausedAt ?? this.audio.time()) - this.startCtx - lag;
   }
 
   private freezeClock() {
@@ -219,6 +245,22 @@ export class GameEngine {
     return this.songMode && (this.chart?.beats?.length ?? 0) > 8;
   }
 
+  /** clicks scheduled ahead on the audio clock (lessons and beat-tracked songs) */
+  private get usesClickList(): boolean {
+    return this.beatSync || !this.songMode;
+  }
+
+  /** lesson count-in and metronome: one click per beat, beat 0 = bar 1 */
+  private prepareLessonClicks() {
+    const lesson = this.lesson!;
+    const n = lesson.countInBeats;
+    this.clicks = [];
+    for (let b = -n; b <= lesson.totalBeats; b++) {
+      this.clicks.push({ t: b, accent: ((b % 4) + 4) % 4 === 0, countIn: b < 0 });
+    }
+    this.clickIdx = 0;
+  }
+
   /**
    * Clicks on the song's tracked beats: a count-in into the first bar at or
    * after `from`, then one per beat (accent on bar starts). Returns how long
@@ -250,7 +292,9 @@ export class GameEngine {
   /** schedule clicks due in the next ~100 ms on the audio clock */
   private tickClicks() {
     const pos = this.beatNow();
-    const lag = this.phase === 'playing' ? this.calOffset() : 0;
+    // the clock subtracts the output latency, so clicks render that much early
+    // and are heard exactly on the beat (song count-ins run on the raw clock)
+    const lag = this.songMode && this.phase !== 'playing' ? 0 : this.calOffset();
     while (this.clickIdx < this.clicks.length) {
       const c = this.clicks[this.clickIdx];
       const dt = (c.t - pos) * this.spb - lag; // real seconds until the click must sound
@@ -381,6 +425,8 @@ export class GameEngine {
     this.laneMiss = this.emptyLaneCount();
     this.playSeconds = 0;
     this.floats = [];
+    this.effects = [];
+    this.comboShown = 0;
     this.flashTimes = {};
   }
 
@@ -401,6 +447,7 @@ export class GameEngine {
       this.anchor = { beat: from - lead, musicBeat: 0, time: 0 };
     } else {
       this.anchor = { beat: 0, musicBeat: 0, time: countInBeats * this.clickSpb };
+      if (!this.songMode) this.prepareLessonClicks();
     }
     this.anchorPos = 0;
     this.phase = 'countin';
@@ -460,7 +507,7 @@ export class GameEngine {
     this.judged = this.notes.map(() => null);
     this.reAnchor();
     if (this.player && this.section) this.player.seek(this.section.start);
-    if (this.beatSync && this.section) this.seekClicks(this.section.start);
+    if (this.usesClickList && this.section) this.seekClicks(this.section.start);
     this.pushHud(true);
   }
 
@@ -492,16 +539,23 @@ export class GameEngine {
     this.pushHud(true);
   }
 
-  /** called for every input event: pads, keyboard, MIDI */
-  hit(lane: Lane, vel = 1) {
+  /**
+   * Called for every input event: pads, keyboard, MIDI. `at` is the input
+   * event's timestamp (performance.now() ms): the hit is judged at that
+   * instant, not when the busy main thread got round to handling it.
+   */
+  hit(lane: Lane, vel = 1, at?: number) {
     if ((!this.lesson && !this.chart) || this.phase === 'idle' || this.phase === 'done') return;
-    const now = this.now();
+    const queued = at === undefined ? 0 : Math.min(0.1, Math.max(0, (performance.now() - at) / 1000));
+    const now = this.now() - queued;
     // the pad sound plays right now on the audio clock (now() is the song clock)
     this.audio.hit(lane, this.audio.time(), vel);
     this.flashTimes[lane] = now;
     this.onFlash(lane);
 
-    if (this.phase !== 'playing') return;
+    // the count-in hands over to play on the next frame; a hit on (or just
+    // before) the first beat must still count
+    if (this.phase !== 'playing' && this.phase !== 'countin') return;
     if (this.paused) {
       if (this.pauseReason === 'wait' && this.notes[this.waitIdx]?.lane === lane) {
         this.paused = false;
@@ -556,13 +610,12 @@ export class GameEngine {
       this.lateCount++;
       this.lateSumMs += ms;
     }
-    const colors: Record<Judgement, string> = {
-      perfect: '#ffd166',
-      great: '#4cc9f0',
-      good: '#34d399',
-      miss: '#f87171',
-    };
-    this.floats.push({ text: j.toUpperCase(), color: colors[j], x: 0.5, at: now });
+    const shownAt = this.now();
+    this.effects.push({ lane, at: shownAt, judge: j, delta, seed: this.effectSeed++ });
+    if (this.combo >= 10 && this.combo % 10 === 0 && this.combo !== this.comboShown) {
+      this.comboShown = this.combo;
+      this.floats.push({ text: `${this.combo} COMBO`, color: '#ffd166', x: 0.5, at: shownAt });
+    }
     this.pushHud(false);
   }
 
@@ -571,6 +624,8 @@ export class GameEngine {
     this.misses++;
     this.laneMiss[this.notes[i].lane]++;
     this.combo = 0;
+    this.comboShown = 0;
+    this.effects.push({ lane: this.notes[i].lane, at: this.now(), judge: 'miss', delta: 0, seed: this.effectSeed++ });
   }
 
   private finish() {
@@ -627,7 +682,8 @@ export class GameEngine {
         }
       } else {
         const beat = this.musicBeatNow();
-        this.countInClick(beat, now);
+        if (this.usesClickList) this.tickClicks();
+        else this.countInClick(beat, now);
         if (beat >= 0) {
           this.phase = 'playing';
           this.player?.start();
@@ -636,7 +692,7 @@ export class GameEngine {
       }
     } else if (this.phase === 'playing' && !this.paused) {
       this.playSeconds += frameSec;
-      if (this.beatSync) this.tickClicks();
+      if (this.usesClickList) this.tickClicks();
       else this.countInClick(this.musicBeatNow(), now);
 
       // loop jump (practice mode with a section selected)
@@ -653,7 +709,7 @@ export class GameEngine {
         } else {
           this.anchorPos = 0;
         }
-        if (this.beatSync) this.seekClicks(this.section.start);
+        if (this.usesClickList) this.seekClicks(this.section.start);
         this.pushHud(true);
       }
 
@@ -842,11 +898,14 @@ export class GameEngine {
       const x = laneIdx * laneW + laneW * 0.14;
       const j = this.judged[i];
       if (j === 'miss') {
-        ctx.globalAlpha = 0.4;
+        // the missed note keeps falling past the line as a fading ✕
+        const fade = 1 - (now - t) / 0.5;
+        if (fade <= 0) continue;
+        ctx.globalAlpha = 0.7 * Math.min(1, fade);
         ctx.strokeStyle = '#f87171';
         ctx.lineWidth = 3;
         const cx = laneIdx * laneW + laneW / 2;
-        const cy = Math.min(y + 10, hitY);
+        const cy = y;
         const s = 8;
         ctx.beginPath();
         ctx.moveTo(cx - s, cy - s);
@@ -868,14 +927,17 @@ export class GameEngine {
       ctx.shadowBlur = 0;
     }
 
-    // floating judgment texts
+    this.drawEffects(ctx, now, laneW, hitY, h);
+
+    // floating texts (combo milestones, wait prompts)
     this.floats = this.floats.filter((f) => now - f.at < 0.8);
     for (const f of this.floats) {
       const age = now - f.at;
-      const y = hitY - 70 - age * 90;
+      // above the lane judgments, so the two never overlap
+      const y = hitY - 150 - age * 60;
       ctx.globalAlpha = age < 0.35 ? 1 : 1 - (age - 0.35) / 0.45;
       ctx.fillStyle = f.color;
-      ctx.font = '700 20px "Avenir Next", system-ui, sans-serif';
+      ctx.font = '800 26px "Avenir Next", system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(f.text, w / 2, y);
       ctx.globalAlpha = 1;
@@ -905,6 +967,121 @@ export class GameEngine {
       ctx.font = '700 22px "Avenir Next", system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(`HIT ${LANE_LABEL[lane].toUpperCase()} TO CONTINUE`, w / 2, h / 2 - 30);
+    }
+  }
+
+  /**
+   * Hit feedback at the lane target: the note pops, a ring bursts outward,
+   * sparks fly, and the judgment (with EARLY/LATE when off) rises above the
+   * lane. A miss tints the lane red.
+   */
+  private drawEffects(ctx: CanvasRenderingContext2D, now: number, laneW: number, hitY: number, h: number) {
+    this.effects = this.effects.filter((e) => now - e.at < EFFECT_LIFE && now >= e.at - 0.05);
+    // one judgment label per lane: a newer hit replaces the older text
+    const newest: Partial<Record<Lane, number>> = {};
+    for (const e of this.effects) newest[e.lane] = Math.max(newest[e.lane] ?? -Infinity, e.at);
+    for (const e of this.effects) {
+      const showText = newest[e.lane] === e.at;
+      const age = Math.max(0, now - e.at);
+      const k = age / EFFECT_LIFE; // 0 → 1
+      const cx = LANES.indexOf(e.lane) * laneW + laneW / 2;
+      const color = LANE_COLOR[e.lane];
+
+      if (e.judge === 'miss') {
+        const a = Math.max(0, 1 - age / 0.25);
+        ctx.fillStyle = `rgba(248,113,113,${0.16 * a})`;
+        ctx.fillRect(cx - laneW / 2, 0, laneW, h);
+        if (showText) {
+          ctx.globalAlpha = Math.max(0, 1 - k * 1.4);
+          ctx.fillStyle = JUDGE_COLOR.miss;
+          ctx.font = '800 15px "Avenir Next", system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('MISS', cx, hitY - 48 - age * 40);
+          ctx.globalAlpha = 1;
+        }
+        continue;
+      }
+
+      // lane glow + target fill
+      const flash = Math.max(0, 1 - age / 0.18);
+      if (flash > 0) {
+        const g = ctx.createLinearGradient(0, hitY - 220, 0, hitY);
+        g.addColorStop(0, hexA(color, 0));
+        g.addColorStop(1, hexA(color, 0.28 * flash));
+        ctx.fillStyle = g;
+        ctx.fillRect(cx - laneW / 2, hitY - 220, laneW, 220);
+        ctx.beginPath();
+        ctx.arc(cx, hitY, 34, 0, Math.PI * 2);
+        ctx.fillStyle = hexA(color, 0.55 * flash);
+        ctx.fill();
+      }
+
+      // the note pops on the line
+      const pop = Math.max(0, 1 - age / 0.16);
+      if (pop > 0) {
+        const s = 1 + (1 - pop) * 0.45;
+        const bw = laneW * 0.72 * s;
+        ctx.globalAlpha = pop;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.roundRect(cx - bw / 2, hitY - 9 * s, bw, 18 * s, 7 * s);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      // expanding rings (perfect gets a second, gold ring)
+      const ease = 1 - (1 - Math.min(1, age / 0.32)) ** 3;
+      const ringA = Math.max(0, 1 - age / 0.32);
+      if (ringA > 0) {
+        ctx.lineWidth = 4 * ringA + 1;
+        ctx.strokeStyle = hexA(color, ringA);
+        ctx.beginPath();
+        ctx.arc(cx, hitY, 34 + ease * 34, 0, Math.PI * 2);
+        ctx.stroke();
+        if (e.judge === 'perfect') {
+          ctx.strokeStyle = hexA(JUDGE_COLOR.perfect, ringA * 0.8);
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(cx, hitY, 34 + ease * 52, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.lineWidth = 1;
+      }
+
+      // sparks
+      const sparks = e.judge === 'perfect' ? 12 : e.judge === 'great' ? 9 : 6;
+      let r = e.seed * 9301 + 49297;
+      const rand = () => ((r = (r * 9301 + 49297) % 233280) / 233280);
+      const sparkA = Math.max(0, 1 - age / 0.42);
+      if (sparkA > 0) {
+        ctx.fillStyle = hexA(color, sparkA);
+        for (let i = 0; i < sparks; i++) {
+          const ang = (i / sparks) * Math.PI * 2 + rand() * 0.5;
+          const speed = 150 + rand() * 170;
+          const d = 30 + speed * age;
+          const size = 3.2 * sparkA + 0.6;
+          ctx.beginPath();
+          ctx.arc(cx + Math.cos(ang) * d, hitY + Math.sin(ang) * d * 0.8, size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // judgment above the lane, with EARLY / LATE when it matters
+      if (!showText) continue;
+      const textA = age < 0.3 ? 1 : Math.max(0, 1 - (age - 0.3) / 0.25);
+      const rise = age * 70;
+      const scale = 1 + Math.max(0, 0.12 - age) * 2.5;
+      ctx.globalAlpha = textA;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = JUDGE_COLOR[e.judge];
+      ctx.font = `800 ${Math.round(17 * scale)}px "Avenir Next", system-ui, sans-serif`;
+      ctx.fillText(e.judge.toUpperCase(), cx, hitY - 50 - rise);
+      if (e.judge !== 'perfect' && Math.abs(e.delta) > 0.02) {
+        ctx.font = '700 11px "Avenir Next", system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.fillText(`${e.delta < 0 ? 'EARLY' : 'LATE'} ${Math.round(Math.abs(e.delta) * 1000)}ms`, cx, hitY - 34 - rise);
+      }
+      ctx.globalAlpha = 1;
     }
   }
 }

@@ -85,7 +85,7 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
 
   // MIDI + keyboard
   useEffect(() => {
-    const mm = new MidiManager((lane, vel) => engine.hit(lane, vel));
+    const mm = new MidiManager((lane, vel, at) => engine.hit(lane, vel, at));
     mm.attachKeyboard();
     let cancelled = false;
     void mm.init().then((s) => {
@@ -303,19 +303,19 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
                 />
               </label>
 
-              {isSong && (
-                <label className="ctl-row">
+              <label className="ctl-row">
                   Audio sync —{' '}
-                  {calMs === null ? `auto (${Math.round(sharedAudio.latencySec() * 1000)}ms)` : `${calMs > 0 ? '+' : ''}${calMs}ms`}
+                  {calMs === null ? `auto (${Math.round(sharedAudio.latencySec() * 1000)}ms)` : `${calMs}ms`}
                   <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
-                    Music sounds behind the notes? Raise. Ahead of them? Lower. Auto uses the device's reported output latency.
+                    How long your speakers or headphones take to play a sound. Hits judged late while you play on the
+                    beat? Raise it. Judged early? Lower it. The results screen can set it from your playing.
                   </span>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <input
                       type="range"
-                      min={-250}
-                      max={350}
-                      step={10}
+                      min={-100}
+                      max={500}
+                      step={5}
                       value={calMs ?? Math.round(sharedAudio.latencySec() * 1000)}
                       onChange={(e) => {
                         const v = Number(e.target.value);
@@ -337,7 +337,6 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
                     </button>
                   </div>
                 </label>
-              )}
 
               <button type="button" className="btn primary big" onClick={resume}>
                 Resume
@@ -357,7 +356,7 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
         )}
       </div>
 
-      <Pads onHit={(lane) => engine.hit(lane, 1)} flashKey={flash.key} flashLane={flash.lane} />
+      <Pads onHit={(lane, at) => engine.hit(lane, 1, at)} flashKey={flash.key} flashLane={flash.lane} />
     </div>
   );
 }

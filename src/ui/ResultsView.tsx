@@ -2,6 +2,21 @@ import type { RunResult } from '../engine/game';
 import { LANE_COLOR } from '../engine/game';
 import { LANES, LANE_LABEL } from '../engine/types';
 import { starsForAccuracy } from '../engine/judge';
+import { sharedAudio } from '../engine/audio';
+import { useState } from 'react';
+
+const CAL_KEY = 'drumlab:cal-ms';
+
+/** timing offset currently in use (ms): the saved one, or the device's reported latency */
+function currentCalMs(): number {
+  try {
+    const v = localStorage.getItem(CAL_KEY);
+    if (v !== null && Number.isFinite(Number(v))) return Number(v);
+  } catch {
+    // storage blocked: fall through to auto
+  }
+  return Math.round(sharedAudio.latencySec() * 1000);
+}
 
 interface Props {
   title: string;
@@ -27,6 +42,21 @@ export default function ResultsView({
   const stars = result.completed ? starsForAccuracy(result.accuracy) : 0;
   const earlyAvg = result.earlyCount > 0 ? result.earlySumMs / result.earlyCount : 0;
   const lateAvg = result.lateCount > 0 ? result.lateSumMs / result.lateCount : 0;
+  // a steady lean one way usually means the speakers/headphones add delay the
+  // device doesn't report; offer to fold it into the timing
+  const timed = result.earlyCount + result.lateCount;
+  const lean = timed > 0 ? (result.lateSumMs - result.earlySumMs) / timed : 0;
+  const offerShift = timed >= 16 && Math.abs(lean) >= 12;
+  const [applied, setApplied] = useState<number | null>(null);
+  const applyShift = () => {
+    const next = Math.max(-100, Math.min(500, Math.round(currentCalMs() + lean)));
+    try {
+      localStorage.setItem(CAL_KEY, String(next));
+    } catch {
+      // storage blocked: nothing to persist
+    }
+    setApplied(next);
+  };
 
   return (
     <div className="results">
@@ -91,6 +121,27 @@ export default function ResultsView({
         <b>{result.lateCount}</b> late (avg <b>{lateAvg.toFixed(0)}ms</b>) ·{' '}
         <b>{result.perfects}</b> perfect · <b>{result.misses}</b> missed
       </p>
+
+      {offerShift && (
+        <div className="timing-fix">
+          {applied === null ? (
+            <>
+              <span>
+                You hit <b>{Math.round(Math.abs(lean))} ms {lean > 0 ? 'late' : 'early'}</b> on average. If you were
+                playing along to what you heard, your audio has extra delay.
+              </span>
+              <button type="button" className="btn" onClick={applyShift}>
+                Shift timing {lean > 0 ? '+' : '−'}
+                {Math.round(Math.abs(lean))} ms
+              </button>
+            </>
+          ) : (
+            <span>
+              Timing set to <b>{applied} ms</b>. Play again to feel it (change it any time in ☰ Menu → Audio sync).
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="result-actions">
         <button type="button" className="btn primary big" onClick={onRetry}>

@@ -11,7 +11,8 @@ const KEY_HINTS: Record<Lane, string> = {
 };
 
 interface Props {
-  onHit: (lane: Lane) => void;
+  /** at = pointer event timestamp (performance.now() ms) */
+  onHit: (lane: Lane, at?: number) => void;
   flashKey: number;
   flashLane: Lane | null;
 }
@@ -27,7 +28,7 @@ export default function Pads({ onHit, flashKey, flashLane }: Props) {
           data-lane={lane}
           onPointerDown={(e) => {
             e.preventDefault();
-            onHit(lane);
+            onHit(lane, e.timeStamp);
           }}
         >
           <span className="key">{KEY_HINTS[lane]}</span>

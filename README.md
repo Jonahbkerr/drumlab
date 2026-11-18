@@ -42,10 +42,23 @@ Web MIDI). Kit setup maps pads to lanes; keyboard fallback is D F J K L ;.
    below is hidden. Stars are tracked per level; the song card suggests the
    first level without stars, and results offer the next level.
 
-In play, the highway clock is the backing track's playhead minus the
-device's output latency, so notes stay locked to what you hear at any
-practice tempo; count-in, metronome and the beat lines follow the tracked
-beats.
+## Timing
+
+Songs and lessons run on one rule: the game clock is the audio render clock
+minus the output latency (what reaches your ears), so notes, clicks and
+judging all line up with what you hear, at any practice tempo. Songs use the
+backing track's playhead; lessons the audio clock, with count-in and
+metronome clicks scheduled ahead on the audio clock (beat-tracked songs click
+on their tracked beats). Hits are judged at the input event's own timestamp
+(keyboard, pads, MIDI), not when the page got round to handling it, and hits
+during the count-in count.
+
+Output latency defaults to what the device reports. If your speakers or
+headphones add more, the results screen notices a steady early/late lean and
+offers to shift timing by that amount (☰ Menu → Audio sync to adjust).
+
+`e2e/timing/` holds the robot drummer that checks all of this in a real
+browser by hitting notes when their sound reaches the speakers.
 
 ## Chart quality bench
 

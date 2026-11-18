@@ -66,7 +66,8 @@ function saveCustomMap(m: Record<number, Lane>) {
 }
 
 export class MidiManager {
-  private onNote: (lane: Lane, vel: number) => void;
+  /** at = when the hit happened (performance.now() ms, from the input event) */
+  private onNote: (lane: Lane, vel: number, at?: number) => void;
   private onEvent: (ev: MidiEvent) => void;
   private onDevices: (devs: MidiDevice[]) => void;
   private access: MIDIAccessLike | null = null;
@@ -76,7 +77,7 @@ export class MidiManager {
   private down = new Set<string>();
 
   constructor(
-    onNote: (lane: Lane, vel: number) => void,
+    onNote: (lane: Lane, vel: number, at?: number) => void,
     onEvent: (ev: MidiEvent) => void = () => {},
     onDevices: (devs: MidiDevice[]) => void = () => {},
   ) {
@@ -155,7 +156,7 @@ export class MidiManager {
         const note = data[1];
         const vel = data[2] / 127;
         const lane = this.resolve(note);
-        if (lane) this.onNote(lane, vel);
+        if (lane) this.onNote(lane, vel, ev.timeStamp);
         this.onEvent({ note, vel, device: name, lane });
       }
     };
@@ -168,7 +169,7 @@ export class MidiManager {
       if (!lane) return;
       if (e.type === 'keydown' && !this.down.has(e.code)) {
         this.down.add(e.code);
-        this.onNote(lane, 1);
+        this.onNote(lane, 1, e.timeStamp);
       } else if (e.type === 'keyup') {
         this.down.delete(e.code);
       }
@@ -189,6 +190,8 @@ export class MidiManager {
 
 interface MIDIMessageEventLike {
   data: Uint8Array;
+  /** receipt time on the performance.now() clock */
+  timeStamp?: number;
 }
 interface MIDIInputLike {
   id?: string;
