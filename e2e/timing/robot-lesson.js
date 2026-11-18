@@ -10,7 +10,7 @@
     const ts = ctx.getOutputTimestamp();
     return ts.performanceTime + (ctxT - ts.contextTime) * 1000;
   };
-  const press = (lane, stamp) => {
+  const press = (lane) => {
     const code = KEY[lane];
     window.dispatchEvent(new KeyboardEvent('keydown', { code, key: code }));
     setTimeout(() => window.dispatchEvent(new KeyboardEvent('keyup', { code, key: code })), 30);

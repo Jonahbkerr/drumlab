@@ -20,7 +20,7 @@ gstack `browse`. Run from the repo root with the dev server on :5173.
 
 ```bash
 e2e/timing/lesson-test.sh 12                 # Backbeat Basics, 12 s
-e2e/timing/song-test.sh "Full kit" 0 26      # first song in the list
+e2e/timing/song-test.sh "Full kit" 0 26 one-step-closer   # level, queue ms, seconds, song title
 e2e/timing/play-song.sh one-step-closer "Full kit"
 # then: browse eval e2e/timing/robot.js; browse js "window.__robot.run(10)"
 ```

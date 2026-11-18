@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameEngine } from '../engine/game';
 import type { GameMode, Hud, RunResult } from '../engine/game';
 import type { Lesson } from '../engine/types';
 import type { SongChart } from '../engine/transcribe';
 import { sharedAudio } from '../engine/audio';
-import { MidiManager } from '../engine/midi';
+import { LANE_KEY, MidiManager } from '../engine/midi';
+import { LANES, LANE_LABEL } from '../engine/types';
+import type { Lane } from '../engine/types';
 import Icon from './Icon';
+import KitView from './KitView';
+import type { KitHandle, KitLabel } from './KitView';
 
 interface Props {
   lesson: Lesson | null;
@@ -26,6 +30,18 @@ const MIDI_LABEL: Record<string, string> = {
   'midi-denied': 'MIDI blocked — using keys',
 };
 
+const SHOW_KIT_KEY = 'drumlab:show-kit';
+const readShowKit = () => {
+  try {
+    return localStorage.getItem(SHOW_KIT_KEY) !== '0';
+  } catch {
+    return true;
+  }
+};
+
+/** each drum's name and its keyboard key, under the drawn kit */
+const KIT_LABELS = Object.fromEntries(LANES.map((l) => [l, { name: LANE_LABEL[l], hint: LANE_KEY[l] }])) as Record<Lane, KitLabel>;
+
 const fmtSec = (s: number) => {
   const m = Math.floor(s / 60);
   const r = Math.floor(s % 60);
@@ -42,6 +58,8 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
   }
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const kitRef = useRef<KitHandle | null>(null);
+  const [showKit, setShowKit] = useState(readShowKit);
   const [hud, setHud] = useState<Hud | null>(null);
   const [mode, setMode] = useState<GameMode>(initialMode ?? 'performance');
   const [sectionIdx, setSectionIdx] = useState(-1);
@@ -64,11 +82,24 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
   const baseBpm = lesson?.bpm ?? song?.chart.bpm ?? 100;
   const sections = lesson?.sections ?? song?.chart.sections ?? [];
   const isSong = !lesson && !!song;
+  // drums this lesson or song plays; the rest of the drawn kit is dimmed
+  const inUse = useMemo(() => {
+    const used = new Set((lesson?.notes ?? song?.chart.notes ?? []).map((n) => n.lane));
+    return LANES.filter((l) => used.has(l));
+  }, [lesson, song]);
 
   // wire engine callbacks once
   useEffect(() => {
     engine.onHud = (h) => setHud(h);
     engine.onResult = (r) => onFinishRef.current(r);
+    // the drawn kit: hits light a drum, misses flash it, next notes glow
+    engine.onFlash = (lane, vel) => kitRef.current?.strike(lane, vel);
+    engine.onMiss = (lane) => kitRef.current?.miss(lane);
+    const cues = Object.fromEntries(LANES.map((l) => [l, 0])) as Record<Lane, number>;
+    engine.onFrame = () => {
+      const kit = kitRef.current;
+      if (kit) kit.cue(engine.cueLevels(cues));
+    };
     if (canvasRef.current) engine.attach(canvasRef.current);
     const savedCal = localStorage.getItem('drumlab:cal-ms');
     engine.setCalibration(savedCal !== null ? Number(savedCal) : null);
@@ -94,6 +125,9 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
       mm.detach();
     };
   }, [engine]);
+
+  // clicking a drum on the drawn kit plays it, like the row labels do
+  const padHit = useCallback((lane: Lane, at: number) => engine.hit(lane, 1, at), [engine]);
 
   const restart = useCallback(
     (m: GameMode, secIdx: number, bm: number, sp: number, wm: boolean) => {
@@ -191,14 +225,21 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
       </div>
 
       <div className="stage">
-        <canvas
-          ref={canvasRef}
-          onPointerDown={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            const lane = engine.laneAt(e.clientY - r.top);
-            if (lane) engine.hit(lane, 1, e.timeStamp);
-          }}
-        />
+        <div className="stage-chart">
+          <canvas
+            ref={canvasRef}
+            onPointerDown={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              const lane = engine.laneAt(e.clientY - r.top);
+              if (lane) engine.hit(lane, 1, e.timeStamp);
+            }}
+          />
+        </div>
+        {showKit && (
+          <div className="stage-kit">
+            <KitView ref={kitRef} labels={KIT_LABELS} inUse={inUse} compact onPad={padHit} />
+          </div>
+        )}
 
         {menuOpen && (
           <>
@@ -305,6 +346,21 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
                         const sp = Number(e.target.value) / 100;
                         setSpeed(sp);
                         engine.setSpeed(sp);
+                      }}
+                    />
+                  </label>
+                  <label className="check">
+                    Show the drum kit
+                    <input
+                      type="checkbox"
+                      checked={showKit}
+                      onChange={(e) => {
+                        setShowKit(e.target.checked);
+                        try {
+                          localStorage.setItem(SHOW_KIT_KEY, e.target.checked ? '1' : '0');
+                        } catch {
+                          // private mode: the choice lasts this session
+                        }
                       }}
                     />
                   </label>

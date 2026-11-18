@@ -1,7 +1,7 @@
 import { sharedAudio } from './audio';
 import type { Lane, Lesson, Note, Section } from './types';
 import { LANES, LANE_LABEL } from './types';
-import { KEY_TO_LANE } from './midi';
+import { LANE_KEY } from './midi';
 import { GOOD_MS, JUDGE_SCORE, judgeDelta, starsForAccuracy } from './judge';
 import type { Judgement } from './judge';
 import type { SongChart } from './transcribe';
@@ -82,9 +82,7 @@ const INK = {
   bad: '#e5534b',
 };
 /** keyboard key per lane, shown under each row label */
-const KEY_HINT = Object.fromEntries(
-  Object.entries(KEY_TO_LANE).map(([code, lane]) => [lane, code === 'Semicolon' ? ';' : code.replace('Key', '')]),
-) as Record<Lane, string>;
+const KEY_HINT = LANE_KEY;
 
 const FONT = "'Geist Variable', 'Helvetica Neue', Arial, sans-serif";
 const MONO = "'Geist Mono Variable', ui-monospace, Menlo, monospace";
@@ -212,7 +210,12 @@ export class GameEngine {
 
   onHud: (h: Hud) => void = () => {};
   onResult: (r: RunResult) => void = () => {};
-  onFlash: (lane: Lane) => void = () => {};
+  /** a pad was hit (any lane, judged or not); vel 0..1 */
+  onFlash: (lane: Lane, vel: number) => void = () => {};
+  /** a note went by unplayed */
+  onMiss: (lane: Lane) => void = () => {};
+  /** once per frame, after drawing */
+  onFrame: () => void = () => {};
 
   private emptyLaneCount(): Record<Lane, number> {
     return { kick: 0, snare: 0, hh: 0, tomLo: 0, tomHi: 0, crash: 0 };
@@ -596,7 +599,7 @@ export class GameEngine {
     // the pad sound plays right now on the audio clock (now() is the song clock)
     this.audio.hit(lane, this.audio.time(), vel);
     this.flashTimes[lane] = now;
-    this.onFlash(lane);
+    this.onFlash(lane, vel);
 
     // the count-in hands over to play on the next frame; a hit on (or just
     // before) the first beat must still count
@@ -671,6 +674,7 @@ export class GameEngine {
     this.combo = 0;
     this.comboShown = 0;
     this.effects.push({ lane: this.notes[i].lane, at: this.now(), judge: 'miss', delta: 0, seed: this.effectSeed++ });
+    this.onMiss(this.notes[i].lane);
   }
 
   private finish() {
@@ -789,6 +793,7 @@ export class GameEngine {
     }
 
     this.draw(now);
+    this.onFrame();
     if (now - this.lastHudAt > 0.1) {
       this.lastHudAt = now;
       this.pushHud(false);
@@ -846,6 +851,45 @@ export class GameEngine {
   // ---------------------------------------------------------------- render
 
   /** lane under a point on the canvas (CSS px), for clicking/tapping a row */
+  /** drums the current lesson or song uses */
+  lanesInUse(): Lane[] {
+    return this.rows;
+  }
+
+  /**
+   * How close each drum's next note is: 0 = half a beat or more away, 1 = due now.
+   * Drives the drum kit's "this one next" glow. Fills and returns `out`.
+   */
+  cueLevels(out: Record<Lane, number>): Record<Lane, number> {
+    for (const l of LANES) out[l] = 0;
+    if ((!this.lesson && !this.chart) || this.phase === 'idle' || this.phase === 'done') return out;
+    if (this.paused && this.pauseReason === 'wait' && this.waitIdx >= 0) {
+      // waiting for one drum: that one stays lit until it is hit
+      out[this.notes[this.waitIdx].lane] = 1;
+      return out;
+    }
+    const now = this.now();
+    // half a beat of lead: each 8th note gets its own build-up instead of a constant glow
+    const horizon = Math.min(0.6, Math.max(0.3, this.clickSpb / 2));
+    // notes are sorted: skip straight to the first one still inside the hit window
+    let lo = 0;
+    let hi = this.notes.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.noteTime(mid) < now - GOOD_MS) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i < this.notes.length; i++) {
+      const dt = this.noteTime(i) - now;
+      if (dt > horizon) break;
+      if (this.judged[i] !== null) continue;
+      const c = 1 - Math.max(0, dt) / horizon;
+      const lane = this.notes[i].lane;
+      if (c > out[lane]) out[lane] = c;
+    }
+    return out;
+  }
+
   laneAt(y: number): Lane | null {
     const g = this.geo;
     if (!g || y < g.top) return null;

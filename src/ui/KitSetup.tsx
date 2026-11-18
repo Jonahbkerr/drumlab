@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
-import { GM_TO_LANE, KEY_TO_LANE, MidiManager } from '../engine/midi';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { sharedAudio } from '../engine/audio';
+import { GM_TO_LANE, LANE_KEY, MidiManager } from '../engine/midi';
 import type { MidiDevice, MidiEvent } from '../engine/midi';
-import { LANE_LABEL } from '../engine/types';
+import { LANES, LANE_LABEL } from '../engine/types';
 import type { Lane } from '../engine/types';
+import KitView from './KitView';
+import type { KitHandle, KitLabel } from './KitView';
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const noteName = (n: number) => `${NOTE_NAMES[n % 12]}${Math.floor(n / 12) - 1}`;
@@ -10,9 +13,7 @@ const noteName = (n: number) => `${NOTE_NAMES[n % 12]}${Math.floor(n / 12) - 1}`
 /** cymbals on top, kick at the bottom, like the play screen and drum notation */
 const ROWS: Lane[] = ['crash', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'];
 
-const KEY_FOR: Partial<Record<Lane, string>> = Object.fromEntries(
-  Object.entries(KEY_TO_LANE).map(([code, lane]) => [lane, code === 'Semicolon' ? ';' : code.replace('Key', '')]),
-);
+const KEY_FOR = LANE_KEY;
 
 const STATUS: Record<string, { text: string; tone: 'ok' | 'bad' | 'idle' }> = {
   'no-midi': { text: 'This browser has no Web MIDI. Open DrumLab in Chrome or Edge.', tone: 'bad' },
@@ -40,11 +41,22 @@ export default function KitSetup() {
     setLearning(lane);
   };
 
+  const kitRef = useRef<KitHandle | null>(null);
+  // a pad (or key) was played: light its drum on the kit and sound it
+  const play = (lane: Lane, vel: number) => {
+    kitRef.current?.strike(lane, vel);
+    sharedAudio.ensure();
+    sharedAudio.hit(lane, sharedAudio.time(), vel);
+  };
+
   const mmRef = useRef<MidiManager | null>(null);
   useEffect(() => {
     let cancelled = false;
     const m: MidiManager = new MidiManager(
-      () => {},
+      (lane, vel) => {
+        // while assigning, the pad belongs to the drum being assigned (below)
+        if (!learningRef.current) play(lane, vel);
+      },
       (ev) => {
         setEvents((e) => [ev, ...e].slice(0, 8));
         const target = learningRef.current;
@@ -55,11 +67,13 @@ export default function KitSetup() {
           setMap(m.customMap);
           learningRef.current = null;
           setLearning(null);
+          play(target, ev.vel);
         }
       },
       (devs) => setDevices(devs),
     );
     mmRef.current = m;
+    m.attachKeyboard();
     void m.init().then((s) => {
       if (!cancelled) {
         setStatus(s);
@@ -68,7 +82,10 @@ export default function KitSetup() {
     });
     return () => {
       cancelled = true;
+      m.detach();
     };
+    // play() only touches refs and the shared audio engine
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const requestAccess = async () => {
@@ -86,6 +103,19 @@ export default function KitSetup() {
   };
 
   const connected = devices.length > 0;
+  // stable between MIDI hits, so the drawn kit only re-renders when a pad changes
+  const kitLabels = useMemo(() => {
+    const padOf = (lane: Lane) => Object.entries(map).find(([, l]) => l === lane)?.[0];
+    return Object.fromEntries(
+      LANES.map((l) => [l, { name: LANE_LABEL[l], hint: learning === l ? 'Hit a pad…' : padOf(l) }]),
+    ) as Record<Lane, KitLabel>;
+  }, [map, learning]);
+  const pickDrum = useCallback((lane: Lane) => {
+    sharedAudio.ensure();
+    const next = learningRef.current === lane ? null : lane;
+    learningRef.current = next;
+    setLearning(next);
+  }, []);
   const st = connected
     ? { text: `${devices.length === 1 ? devices[0].name : `${devices.length} devices`} connected`, tone: 'ok' as const }
     : (STATUS[status] ?? { text: status, tone: 'idle' as const });
@@ -113,6 +143,26 @@ export default function KitSetup() {
           </button>
         )}
       </div>
+
+      <section className="surface kit-stage" aria-label="Your kit">
+        <KitView
+          ref={kitRef}
+          labels={kitLabels}
+          selected={learning}
+          onPad={pickDrum}
+        />
+        <p className="kit-stage-hint" aria-live="polite">
+          {learning ? (
+            <>
+              Hit the pad you want for <b>{LANE_LABEL[learning]}</b>. Click the drum again to cancel.
+            </>
+          ) : connected ? (
+            'Hit any pad and its drum lights up. Click a drum to give it a different pad.'
+          ) : (
+            'Connect your kit, or press D F J K L ; to try it. Click a drum to choose its pad.'
+          )}
+        </p>
+      </section>
 
       <div className="kit-grid">
         <section aria-labelledby="map-title">

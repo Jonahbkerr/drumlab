@@ -16,6 +16,12 @@ npm run dev        # http://localhost:5173
 Plug the kit in over USB before opening the page (Chrome or Edge, which have
 Web MIDI). Kit setup maps pads to lanes; keyboard fallback is D F J K L ;.
 
+A drawn kit (hi-hat, snare, kick, high and low tom, crash) sits under the play
+chart and on the Kit page. Each pad hit lights its drum, brighter for harder
+hits; a drum's ring glows as its next note comes up and flashes red on a miss.
+On the Kit page, click a drum and hit a pad to assign it. Hide the kit from the
+play screen's settings panel.
+
 ## How song charts are made
 
 `src/engine/chart/`

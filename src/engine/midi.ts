@@ -10,6 +10,11 @@ export const KEY_TO_LANE: Record<string, Lane> = {
   Semicolon: 'crash',
 };
 
+/** the key that plays each lane, as printed on the keycap */
+export const LANE_KEY = Object.fromEntries(
+  Object.entries(KEY_TO_LANE).map(([code, lane]) => [lane, code === 'Semicolon' ? ';' : code.replace('Key', '')]),
+) as Record<Lane, string>;
+
 /** General MIDI percussion map — the fallback when no custom map entry exists. */
 export const GM_TO_LANE: Record<number, Lane> = {
   35: 'kick',
@@ -74,6 +79,8 @@ export class MidiManager {
   private devices: MidiDevice[] = [];
   private custom: Record<number, Lane> = loadCustomMap();
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  /** inputs this manager listens to, so detach() can let go of them */
+  private attached = new Map<MIDIInputLike, (ev: MIDIMessageEventLike) => void>();
   private down = new Set<string>();
 
   constructor(
@@ -149,7 +156,7 @@ export class MidiManager {
   }
 
   private attachInput(input: MIDIInputLike, name: string) {
-    input.onmidimessage = (ev: MIDIMessageEventLike) => {
+    const handler = (ev: MIDIMessageEventLike) => {
       const data = ev.data;
       const status = data[0] & 0xf0;
       if ((status === 0x90 && data[2] > 0) || (status === 0x99 && data[2] > 0)) {
@@ -160,6 +167,8 @@ export class MidiManager {
         this.onEvent({ note, vel, device: name, lane });
       }
     };
+    input.onmidimessage = handler;
+    this.attached.set(input, handler);
   }
 
   attachKeyboard() {
@@ -178,7 +187,11 @@ export class MidiManager {
     window.addEventListener('keyup', this.keyHandler);
   }
 
+  /** stop listening: keyboard, and any MIDI inputs no other screen has taken over */
   detach() {
+    for (const [input, handler] of this.attached) if (input.onmidimessage === handler) input.onmidimessage = null;
+    this.attached.clear();
+    if (this.access) this.access.onstatechange = null;
     if (this.keyHandler) {
       window.removeEventListener('keydown', this.keyHandler);
       window.removeEventListener('keyup', this.keyHandler);
