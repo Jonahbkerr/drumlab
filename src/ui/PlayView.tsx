@@ -10,6 +10,12 @@ import Pads from './Pads';
 interface Props {
   lesson: Lesson | null;
   song: { chart: SongChart; buffer: AudioBuffer; title: string } | null;
+  /** start in practice mode (song cards' Practice button) */
+  initialMode?: GameMode;
+  /** a song's playable levels and the one being played */
+  levels?: { level: number; name: string; notes: number }[];
+  level?: number;
+  onLevel?: (level: number, mode: GameMode) => void;
   onFinish: (r: RunResult) => void;
   onQuit: () => void;
 }
@@ -26,19 +32,18 @@ const fmtSec = (s: number) => {
   return `${m}:${String(r).padStart(2, '0')}`;
 };
 
-export default function PlayView({ lesson, song, onFinish, onQuit }: Props) {
+export default function PlayView({ lesson, song, initialMode, levels, level, onLevel, onFinish, onQuit }: Props) {
   const engineRef = useRef<GameEngine | null>(null);
   if (!engineRef.current) engineRef.current = new GameEngine();
   const engine = engineRef.current;
   // dev builds: let automated tests read the clock and playhead
-  if (import.meta.env.DEV) (window as unknown as { __engine?: GameEngine }).__engine = engine;
   if (import.meta.env.DEV) {
     (window as unknown as { __engine?: GameEngine }).__engine = engine;
   }
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hud, setHud] = useState<Hud | null>(null);
-  const [mode, setMode] = useState<GameMode>('performance');
+  const [mode, setMode] = useState<GameMode>(initialMode ?? 'performance');
   const [sectionIdx, setSectionIdx] = useState(-1);
   const [bpmMul, setBpmMul] = useState(1);
   const [speed, setSpeed] = useState(1);
@@ -69,8 +74,9 @@ export default function PlayView({ lesson, song, onFinish, onQuit }: Props) {
     if (canvasRef.current) engine.attach(canvasRef.current);
     const savedCal = localStorage.getItem('drumlab:cal-ms');
     engine.setCalibration(savedCal !== null ? Number(savedCal) : null);
-    if (song) engine.loadSong(song.chart, song.buffer, 'performance', { sectionIndex: -1, bpmMul: 1, waitMode: false, speed: 1 });
-    else if (lesson) engine.load(lesson, 'performance', { sectionIndex: -1, bpmMul: 1, waitMode: false, speed: 1 });
+    const startMode = initialMode ?? 'performance';
+    if (song) engine.loadSong(song.chart, song.buffer, startMode, { sectionIndex: -1, bpmMul: 1, waitMode: false, speed: 1 });
+    else if (lesson) engine.load(lesson, startMode, { sectionIndex: -1, bpmMul: 1, waitMode: false, speed: 1 });
     engine.setMetronome(metronome);
     engine.start();
     return () => engine.stop();
@@ -172,6 +178,23 @@ export default function PlayView({ lesson, song, onFinish, onQuit }: Props) {
           <div className="overlay">
             <div className="panel card">
               <h3>{menuOpen ? 'Menu' : 'Paused'}</h3>
+
+              {levels && levels.length > 1 && onLevel && (
+                <label className="ctl-row">
+                  Level
+                  <select
+                    className="ctl"
+                    value={level}
+                    onChange={(e) => onLevel(Number(e.target.value), mode)}
+                  >
+                    {levels.map((l) => (
+                      <option key={l.level} value={l.level}>
+                        {l.level}. {l.name} ({l.notes} notes)
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               <div className="mode-switch">
                 <button

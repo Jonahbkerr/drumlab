@@ -3,7 +3,7 @@
  * the analysis into the SongChart the game plays.
  */
 import type { Lane } from './types';
-import { arrangeChart } from './chart/pipeline';
+import { arrangeChart, retrack } from './chart/pipeline';
 import type { ChartAnalysis } from './chart/pipeline';
 
 export interface SongChart {
@@ -18,6 +18,8 @@ export interface SongChart {
   beats?: number[];
   /** index into beats of the first bar start */
   downbeat?: number;
+  /** difficulty level this chart was built at (absent on single-level charts) */
+  level?: number;
 }
 
 export interface SongSettings {
@@ -25,16 +27,61 @@ export interface SongSettings {
   bpm: number;
   /** 0.5–2; higher keeps quieter hits */
   sensitivity: number;
-  /** 1 Easy · 2 Medium · 3 Hard · 4 Full */
+  /** level shown first when previewing (every level is playable later) */
   level: number;
 }
 
-export const LEVELS: { level: number; name: string; blurb: string }[] = [
-  { level: 1, name: 'Easy', blurb: 'Kick and snare on the 8ths' },
-  { level: 2, name: 'Medium', blurb: 'Adds hats and cymbals, 8ths only' },
-  { level: 3, name: 'Hard', blurb: 'The full groove, no ghost notes' },
-  { level: 4, name: 'Full', blurb: 'Everything the drummer played' },
+export interface LevelInfo {
+  level: number;
+  name: string;
+  blurb: string;
+}
+
+export const LEVELS: LevelInfo[] = [
+  { level: 1, name: 'Pulse', blurb: 'Kick and snare on the beat' },
+  { level: 2, name: 'Backbeat', blurb: 'Kick and snare on the 8th notes' },
+  { level: 3, name: 'Groove', blurb: 'Adds hi-hats and crashes, 8th notes' },
+  { level: 4, name: 'Full kit', blurb: 'The real part: 16ths, toms, fills' },
+  { level: 5, name: 'Master', blurb: 'Everything, ghost notes included' },
 ];
+
+/** progress/result id of one level of a saved song */
+export const levelId = (songId: string, level: number) => `${songId}:L${level}`;
+
+export function parseLevelId(id: string): { songId: string; level: number | null } {
+  const m = /^(.*):L(\d)$/.exec(id);
+  return m ? { songId: m[1], level: Number(m[2]) } : { songId: id, level: null };
+}
+
+export interface SongLevel extends LevelInfo {
+  chart: SongChart;
+}
+
+/** the requested level, or the nearest easier one that exists */
+export function pickLevel<T extends { level: number }>(levels: T[], level: number): T | undefined {
+  let best: T | undefined;
+  for (const l of levels) if (l.level <= level) best = l;
+  return best ?? levels[0];
+}
+
+/**
+ * Every playable level of a song, easiest first. A level that adds under 5%
+ * more notes than the one below it is dropped (e.g. Master on a song with no
+ * ghost notes), so each step is a real step up.
+ */
+export function songLevels(a: ChartAnalysis, settings: SongSettings, title: string, songId: string): SongLevel[] {
+  const tracked = settings.bpm > 0 ? retrack(a, settings.bpm) : a;
+  const out: SongLevel[] = [];
+  for (const info of LEVELS) {
+    const chart = buildSongChart(tracked, { ...settings, level: info.level }, title, levelId(songId, info.level));
+    chart.level = info.level;
+    const prev = out[out.length - 1];
+    if (prev && chart.notes.length < prev.chart.notes.length * 1.05) continue;
+    if (chart.notes.length === 0) continue;
+    out.push({ ...info, chart });
+  }
+  return out;
+}
 
 export const DEFAULT_SETTINGS: SongSettings = { bpm: 0, sensitivity: 1, level: 3 };
 
@@ -42,7 +89,11 @@ export const DEFAULT_SETTINGS: SongSettings = { bpm: 0, sensitivity: 1, level: 3
 export function normalizeSettings(raw: unknown): SongSettings {
   const r = (raw ?? {}) as Partial<SongSettings>;
   if (typeof r.level === 'number' && typeof r.sensitivity === 'number') {
-    return { bpm: typeof r.bpm === 'number' ? r.bpm : 0, sensitivity: r.sensitivity, level: r.level };
+    return {
+      bpm: typeof r.bpm === 'number' ? r.bpm : 0,
+      sensitivity: r.sensitivity,
+      level: Math.max(1, Math.min(5, Math.round(r.level))),
+    };
   }
   return { ...DEFAULT_SETTINGS };
 }

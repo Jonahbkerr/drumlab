@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { RunResult } from './engine/game';
+import type { GameMode, RunResult } from './engine/game';
 import type { PathId } from './engine/types';
 import { lessonById, lessonsInPath } from './content/lessons';
 import { loadProgress, recordResult, saveProgress } from './state/progress';
 import type { Progress } from './state/progress';
-import { decodeAudioBytes } from './engine/transcribe';
+import { decodeAudioBytes, normalizeSettings, parseLevelId, pickLevel, songLevels } from './engine/transcribe';
 import { fitToContext } from './engine/stretch';
 import { sharedAudio } from './engine/audio';
 import { getSong } from './engine/songstore';
-import type { SongChart } from './engine/transcribe';
+import type { SongChart, SongLevel } from './engine/transcribe';
 import Home from './ui/Home';
 import LessonList from './ui/LessonList';
 import PlayView from './ui/PlayView';
@@ -22,15 +22,15 @@ type View =
   | { name: 'play'; lessonId: string }
   | { name: 'kit' }
   | { name: 'songs' }
-  | { name: 'songplay'; songId: string }
-  | { name: 'results'; lessonId: string; result: RunResult; title?: string };
+  | { name: 'songplay'; songId: string; mode: GameMode; level?: number }
+  | { name: 'results'; lessonId: string; result: RunResult; title?: string; next?: { level: number; name: string } };
 
 export default function App() {
   const [progress, setProgress] = useState<Progress>(loadProgress);
   const [view, setView] = useState<View>({ name: 'home' });
   const [prevBest, setPrevBest] = useState<number | null>(null);
 
-  const handleFinish = useCallback((r: RunResult, title?: string) => {
+  const handleFinish = useCallback((r: RunResult, title?: string, next?: { level: number; name: string }) => {
     const isPerformance = r.mode === 'performance';
     setPrevBest(isPerformance ? (loadProgress().lessons[r.lessonId]?.bestAcc ?? 0) : null);
     setProgress((p) => {
@@ -38,7 +38,7 @@ export default function App() {
       saveProgress(next);
       return next;
     });
-    setView({ name: 'results', lessonId: r.lessonId, result: r, title });
+    setView({ name: 'results', lessonId: r.lessonId, result: r, title, next });
   }, []);
 
   if (view.name === 'home') {
@@ -72,7 +72,7 @@ export default function App() {
       <SongLibrary
         progress={progress}
         onBack={() => setView({ name: 'home' })}
-        onPlay={(songId) => setView({ name: 'songplay', songId })}
+        onPlay={(songId, mode, level) => setView({ name: 'songplay', songId, mode, level })}
       />
     );
   }
@@ -80,8 +80,12 @@ export default function App() {
   if (view.name === 'songplay') {
     return (
       <SongPlay
+        key={view.songId}
         songId={view.songId}
-        onFinish={(r, title) => handleFinish(r, title)}
+        mode={view.mode}
+        level={view.level}
+        onLevel={(level, mode) => setView({ ...view, level, mode })}
+        onFinish={handleFinish}
         onQuit={() => setView({ name: 'songs' })}
       />
     );
@@ -118,13 +122,17 @@ export default function App() {
         />
       );
     }
-    // song results
+    // song results: retry this level, or step up to the next one
+    const { songId, level } = parseLevelId(view.lessonId);
+    const next = view.next;
     return (
       <ResultsView
         title={title}
         result={view.result}
         isBest={prevBest !== null && view.result.accuracy > prevBest && view.result.mode === 'performance'}
-        onRetry={() => setView({ name: 'songplay', songId: view.lessonId })}
+        nextLabel={next ? `Next level: ${next.name}` : undefined}
+        onRetry={() => setView({ name: 'songplay', songId, mode: view.result.mode, level: level ?? undefined })}
+        onNext={() => next && setView({ name: 'songplay', songId, mode: 'performance', level: next.level })}
         onHome={() => setView({ name: 'songs' })}
         homeLabel="My songs"
       />
@@ -136,14 +144,26 @@ export default function App() {
 
 function SongPlay({
   songId,
+  mode,
+  level,
+  onLevel,
   onFinish,
   onQuit,
 }: {
   songId: string;
-  onFinish: (r: RunResult, title?: string) => void;
+  mode: GameMode;
+  level?: number;
+  onLevel: (level: number, mode: GameMode) => void;
+  onFinish: (r: RunResult, title?: string, next?: { level: number; name: string }) => void;
   onQuit: () => void;
 }) {
-  const [loaded, setLoaded] = useState<{ chart: SongChart; buffer: AudioBuffer; title: string } | null>(null);
+  const [loaded, setLoaded] = useState<{
+    chart: SongChart;
+    buffer: AudioBuffer;
+    title: string;
+    levels: SongLevel[];
+    defaultLevel: number;
+  } | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -156,7 +176,9 @@ function SongPlay({
         // playback context may run at 24/48k — resample so SongTouch and the
         // plain fallback both play at true speed
         const buffer = await fitToContext(decoded, sharedAudio.sampleRate());
-        if (!cancelled) setLoaded({ chart: s.chart, buffer, title: s.title });
+        const settings = normalizeSettings(s.settings);
+        const levels = s.analysis ? songLevels(s.analysis, settings, s.title, s.id) : [];
+        if (!cancelled) setLoaded({ chart: s.chart, buffer, title: s.title, levels, defaultLevel: settings.level });
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
       }
@@ -185,11 +207,22 @@ function SongPlay({
       </div>
     );
   }
+  // songs charted before levels existed play their single saved chart
+  const current = pickLevel(loaded.levels, level ?? loaded.defaultLevel);
+  const chart = current?.chart ?? loaded.chart;
+  const title = current ? `${loaded.title} · ${current.name}` : loaded.title;
+  const idx = current ? loaded.levels.indexOf(current) : -1;
+  const next = idx >= 0 ? loaded.levels[idx + 1] : undefined;
   return (
     <PlayView
+      key={chart.id}
       lesson={null}
-      song={loaded}
-      onFinish={(r) => onFinish(r, loaded.title)}
+      song={{ chart, buffer: loaded.buffer, title }}
+      initialMode={mode}
+      levels={loaded.levels.length > 0 ? loaded.levels.map((l) => ({ level: l.level, name: l.name, notes: l.chart.notes.length })) : undefined}
+      level={current?.level}
+      onLevel={onLevel}
+      onFinish={(r) => onFinish(r, title, next ? { level: next.level, name: next.name } : undefined)}
       onQuit={onQuit}
     />
   );

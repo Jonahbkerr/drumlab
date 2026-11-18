@@ -17,7 +17,7 @@ export interface Hit {
 }
 
 export interface ArrangeOpts {
-  /** 1 Easy · 2 Medium · 3 Hard · 4 Full */
+  /** 1 Pulse · 2 Backbeat · 3 Groove · 4 Full kit · 5 Master */
   level: number;
   /** 0.5 – 2; higher keeps quieter hits */
   sensitivity: number;
@@ -93,11 +93,21 @@ export function arrange(hits: Hit[], grid: BeatGrid, opts: ArrangeOpts): ChartNo
   }
   let notes = [...bySlot.values()].map(({ slot, hit }) => ({ slot, t: hit.t, lane: hit.lane, strength: hit.prob }));
 
-  // 2. difficulty
-  const level = Math.round(opts.level);
-  if (level <= 3) notes = notes.filter((n) => !(n.lane === 'snare' && n.strength < GHOST)); // no ghost notes
-  if (level <= 2) notes = notes.filter((n) => n.slot % 2 === 0); // 8th-note grid only
-  if (level <= 1) notes = notes.filter((n) => n.lane === 'kick' || n.lane === 'snare');
+  // notes sharing a slot share one time (the strongest hit's), settled before
+  // the level filter so every level places a given note at the same instant
+  const lead = new Map<number, { t: number; strength: number }>();
+  for (const n of notes) {
+    const cur = lead.get(n.slot);
+    if (!cur || n.strength > cur.strength) lead.set(n.slot, { t: n.t, strength: n.strength });
+  }
+  notes = notes.map((n) => ({ ...n, t: Math.round(lead.get(n.slot)!.t * 1000) / 1000 }));
+
+  // 2. difficulty ladder (each level keeps a subset of the one above)
+  const level = Math.max(1, Math.min(5, Math.round(opts.level)));
+  if (level <= 4) notes = notes.filter((n) => !(n.lane === 'snare' && n.strength < GHOST)); // no ghost notes
+  if (level <= 3) notes = notes.filter((n) => n.slot % 2 === 0 && n.lane !== 'tomLo' && n.lane !== 'tomHi'); // 8ths, no fills
+  if (level <= 2) notes = notes.filter((n) => n.lane === 'kick' || n.lane === 'snare');
+  if (level <= 1) notes = notes.filter((n) => n.slot % 4 === 0); // on the beat only
 
   // 3. two hands: at most two hand drums at once (crash > snare > toms > hat)
   const handRank: Record<Lane, number> = { crash: 0, snare: 1, tomHi: 2, tomLo: 2, hh: 3, kick: 9 };
@@ -111,9 +121,7 @@ export function arrange(hits: Hit[], grid: BeatGrid, opts: ArrangeOpts): ChartNo
   for (const arr of slots.values()) {
     const hands = arr.filter((n) => n.lane !== 'kick').sort((a, b) => handRank[a.lane] - handRank[b.lane]);
     const keep = new Set([...arr.filter((n) => n.lane === 'kick'), ...hands.slice(0, 2)]);
-    // notes sharing a slot share one time: the strongest hit's
-    const lead = arr.reduce((a, b) => (b.strength > a.strength ? b : a));
-    for (const n of keep) out.push({ t: Math.round(lead.t * 1000) / 1000, lane: n.lane, strength: n.strength });
+    for (const n of keep) out.push({ t: n.t, lane: n.lane, strength: n.strength });
   }
   return out.sort((a, b) => a.t - b.t);
 }

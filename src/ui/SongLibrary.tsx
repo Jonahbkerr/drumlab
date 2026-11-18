@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { analyzeInWorker } from '../engine/chart/client';
-import { retrack } from '../engine/chart/pipeline';
 import type { ChartAnalysis } from '../engine/chart/pipeline';
 import type { GameMode } from '../engine/game';
 import { deleteSong, getSong, listSongs, putSong } from '../engine/songstore';
 import type { SongMeta } from '../engine/songstore';
 import {
   DEFAULT_SETTINGS,
-  LEVELS,
-  buildSongChart,
   decodeAudioBytes,
   decodeAudioFile,
+  levelId,
   monoSamples,
   normalizeSettings,
+  pickLevel,
+  songLevels,
 } from '../engine/transcribe';
-import type { SongChart, SongSettings } from '../engine/transcribe';
+import type { SongChart, SongLevel, SongSettings } from '../engine/transcribe';
+import { nextSongLevel } from '../state/progress';
 import type { Progress } from '../state/progress';
 import { LANE_LABEL } from '../engine/types';
 import type { Lane } from '../engine/types';
@@ -24,18 +25,19 @@ import Stars from './Stars';
 interface Props {
   progress: Progress;
   onBack: () => void;
-  onPlay: (songId: string, mode: GameMode) => void;
+  onPlay: (songId: string, mode: GameMode, level?: number) => void;
 }
 
 interface Working {
+  id: string;
+  createdAt: number;
   name: string;
   file: File;
-  /** analysis at the detected tempo; tempo overrides re-track from it */
+  /** analysis at the detected tempo; levels re-track from it on a tempo override */
   base: ChartAnalysis | null;
-  analysis: ChartAnalysis | null;
   autoBpm: number;
   settings: SongSettings;
-  chart: SongChart | null;
+  levels: SongLevel[];
 }
 
 const fmtSec = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -48,6 +50,8 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [recharting, setRecharting] = useState<string | null>(null);
   const [bpmText, setBpmText] = useState('');
+  /** level picked on each song card (defaults to the next one to beat) */
+  const [picked, setPicked] = useState<Record<string, number>>({});
   const fileRef = useRef<HTMLInputElement | null>(null);
   const tapsRef = useRef<number[]>([]);
 
@@ -63,16 +67,19 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
     if (!f) return;
     setError(null);
     const name = f.name.replace(/\.[^.]+$/, '');
+    const createdAt = Date.now();
+    const id = `song-${createdAt.toString(36)}`;
     try {
       setBusy('Decoding');
       setStage(null);
       const buffer = await decodeAudioFile(f);
-      setWorking({ name, file: f, base: null, analysis: null, autoBpm: 0, settings: DEFAULT_SETTINGS, chart: null });
+      setWorking({ id, createdAt, name, file: f, base: null, autoBpm: 0, settings: DEFAULT_SETTINGS, levels: [] });
       setBusy('Analyzing');
       const a = await analyzeInWorker(monoSamples(buffer), {}, (s, p) => setStage({ stage: s, p }));
-      const chart = buildSongChart(a, DEFAULT_SETTINGS, name);
-      setWorking({ name, file: f, base: a, analysis: a, autoBpm: chart.bpm, settings: DEFAULT_SETTINGS, chart });
-      setBpmText(String(chart.bpm));
+      const levels = songLevels(a, DEFAULT_SETTINGS, name, id);
+      const autoBpm = levels[0]?.chart.bpm ?? 0;
+      setWorking({ id, createdAt, name, file: f, base: a, autoBpm, settings: DEFAULT_SETTINGS, levels });
+      setBpmText(String(autoBpm));
     } catch (e) {
       setWorking(null);
       setError(
@@ -90,16 +97,18 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
     const w = working;
     if (!w?.base) return;
     const settings = { ...w.settings, ...next };
-    const analysis = next.bpm !== undefined ? retrack(w.base, settings.bpm) : (w.analysis ?? w.base);
-    const chart = buildSongChart(analysis, settings, w.name, w.chart?.id);
-    setWorking({ ...w, settings, analysis, chart });
-    if (next.bpm !== undefined) setBpmText(String(chart.bpm));
+    // level only changes which chart is previewed; tempo and sensitivity rebuild them all
+    const levels = next.level !== undefined && Object.keys(next).length === 1 ? w.levels : songLevels(w.base, settings, w.name, w.id);
+    setWorking({ ...w, settings, levels });
+    if (next.bpm !== undefined) setBpmText(String(levels[0]?.chart.bpm ?? ''));
   };
+
+  const preview = working ? pickLevel(working.levels, working.settings.level) : undefined;
 
   const commitBpm = () => {
     const v = Number(bpmText);
     if (Number.isFinite(v) && v >= 40 && v <= 260) update({ bpm: Math.round(v * 10) / 10 });
-    else setBpmText(String(working?.chart?.bpm ?? ''));
+    else setBpmText(String(preview?.chart.bpm ?? ''));
   };
 
   const tap = () => {
@@ -114,22 +123,24 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
     }
   };
 
-  const save = async (): Promise<string | null> => {
-    if (!working?.chart) return null;
+  const save = async (): Promise<{ id: string; level: number } | null> => {
+    if (!working?.base || !preview) return null;
     setBusy('Saving');
-    const chart = working.chart;
+    const { id, createdAt, name, base, settings } = working;
+    const level = preview.level;
     await putSong({
-      id: chart.id,
-      title: working.name,
-      createdAt: Date.now(),
+      id,
+      title: name,
+      createdAt,
       bytes: await working.file.arrayBuffer(),
-      settings: working.settings,
-      chart,
+      settings: { ...settings, level },
+      chart: { ...preview.chart, id },
+      analysis: base,
     });
     setWorking(null);
     setBusy(null);
     refresh();
-    return chart.id;
+    return { id, level };
   };
 
   const rechart = async (id: string) => {
@@ -141,8 +152,9 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
       const buffer = await decodeAudioBytes(stored.bytes);
       const a = await analyzeInWorker(monoSamples(buffer));
       const settings = normalizeSettings(stored.settings);
-      const analysis = settings.bpm > 0 ? retrack(a, settings.bpm) : a;
-      await putSong({ ...stored, settings, chart: buildSongChart(analysis, settings, stored.title, id) });
+      const lv = pickLevel(songLevels(a, settings, stored.title, id), settings.level);
+      if (!lv) throw new Error('no drums found');
+      await putSong({ ...stored, settings, chart: { ...lv.chart, id }, analysis: a });
       refresh();
     } catch (e) {
       setError(`Re-chart failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -169,7 +181,8 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
         <div>
           <h2 style={{ fontSize: 26 }}>🎧 My songs</h2>
           <p style={{ color: 'var(--muted)', fontSize: 14, margin: '4px 0 0' }}>
-            Import any track: the drum part is transcribed on your machine and becomes a playable chart.
+            Import any track: the drum part is transcribed on your machine and becomes a ladder of levels, from the
+            pulse to the full part.
           </p>
         </div>
       </div>
@@ -191,7 +204,7 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
               ＋ Import a song (MP3 / M4A / WAV)
             </button>
             <span style={{ color: 'var(--muted)', fontSize: 13.5 }}>
-              Finds kick, snare, hats, toms and cymbals, follows the beat, then charts it at your level.
+              Finds kick, snare, hats, toms and cymbals, follows the beat, then builds levels you can climb.
             </span>
           </div>
         ) : (
@@ -215,29 +228,27 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
               </div>
             )}
 
-            {working.chart && (
+            {preview && (
               <>
                 <div className="ctl-row">
-                  Difficulty
-                  <div className="mode-switch">
-                    {LEVELS.map((l) => (
+                  {working.levels.length} levels: every one is saved, preview any of them
+                  <div className="mode-switch level-switch">
+                    {working.levels.map((l) => (
                       <button
                         key={l.level}
                         type="button"
-                        className={`btn${working.settings.level === l.level ? ' active' : ''}`}
+                        className={`btn${preview.level === l.level ? ' active' : ''}`}
                         onClick={() => update({ level: l.level })}
                         title={l.blurb}
                       >
-                        {l.name}
+                        <span className="level-num">{l.level}</span> {l.name}
                       </button>
                     ))}
                   </div>
-                  <span style={{ fontWeight: 500, fontSize: 12.5 }}>
-                    {LEVELS.find((l) => l.level === working.settings.level)?.blurb}
-                  </span>
+                  <span style={{ fontWeight: 500, fontSize: 12.5 }}>{preview.blurb}</span>
                 </div>
 
-                <ChartPreview chart={working.chart} />
+                <ChartPreview chart={preview.chart} />
 
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                   <label className="ctl-row" style={{ flex: 1, minWidth: 150 }}>
@@ -283,9 +294,9 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
 
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <span className="pill">
-                    {working.chart.notes.length} notes · {(working.chart.notes.length / working.chart.durationSec).toFixed(1)}/s
+                    {preview.chart.notes.length} notes · {(preview.chart.notes.length / preview.chart.durationSec).toFixed(1)}/s
                   </span>
-                  {Object.entries(laneCounts(working.chart)).map(([lane, c]) => (
+                  {Object.entries(laneCounts(preview.chart)).map(([lane, c]) => (
                     <span key={lane} className="pill" style={{ color: `var(--${lane.toLowerCase()})` }}>
                       {LANE_LABEL[lane as Lane] ?? lane}: {c}
                     </span>
@@ -301,10 +312,10 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
                     className="btn big"
                     disabled={busy !== null}
                     onClick={() => {
-                      void save().then((id) => id && onPlay(id, 'performance'));
+                      void save().then((s) => s && onPlay(s.id, 'performance', s.level));
                     }}
                   >
-                    ▶ Save &amp; play
+                    ▶ Save &amp; play {preview.name}
                   </button>
                 </div>
               </>
@@ -320,24 +331,65 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
 
       <div className="lesson-list">
         {songs.map((s) => {
-          const rec = progress.lessons[s.id];
           const busyHere = recharting === s.id;
+          const hasLevels = s.levels.length > 0;
+          const sel = hasLevels ? (pickLevel(s.levels, picked[s.id] ?? nextSongLevel(progress, s.id, s.levels)) ?? s.levels[0]) : null;
+          const rec = progress.lessons[sel ? levelId(s.id, sel.level) : s.id];
+          const passed = s.levels.filter((l) => (progress.lessons[levelId(s.id, l.level)]?.stars ?? 0) > 0).length;
           return (
             <div key={s.id} className="card lesson-card" style={{ cursor: 'default' }}>
               <div className="top">
-                <Stars count={3} filled={rec?.stars ?? 0} />
+                {hasLevels ? (
+                  <span className="pill">
+                    {passed}/{s.levels.length} levels passed
+                  </span>
+                ) : (
+                  <Stars count={3} filled={rec?.stars ?? 0} />
+                )}
                 <span className="pill">{s.bpm} BPM</span>
               </div>
               <h3>{s.title}</h3>
               <p>
-                {fmtSec(s.durationSec)} · {s.noteCount} notes
-                {!s.modern && <span className="old-chart"> · old chart, re-chart it</span>}
+                {fmtSec(s.durationSec)}
+                {!hasLevels && <span className="old-chart"> · old chart, re-chart it to get levels</span>}
               </p>
+              {hasLevels && sel && (
+                <>
+                  <div className="level-ladder" role="radiogroup" aria-label={`${s.title} levels`}>
+                    {s.levels.map((l) => {
+                      const stars = progress.lessons[levelId(s.id, l.level)]?.stars ?? 0;
+                      return (
+                        <button
+                          key={l.level}
+                          type="button"
+                          role="radio"
+                          aria-checked={sel.level === l.level}
+                          className={`level-chip${sel.level === l.level ? ' active' : ''}`}
+                          onClick={() => setPicked((p) => ({ ...p, [s.id]: l.level }))}
+                          title={`${l.name}: ${l.blurb} (${l.notes} notes)`}
+                        >
+                          <span className="level-num">{l.level}</span>
+                          <span className="level-name">{l.name}</span>
+                          <Stars count={3} filled={stars} size={11} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="level-blurb">
+                    {sel.blurb} · {sel.notes} notes
+                  </p>
+                </>
+              )}
               <div className="meta" style={{ gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" className="btn primary" onClick={() => onPlay(s.id, 'performance')} disabled={busyHere}>
-                  ▶ Play
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => onPlay(s.id, 'performance', sel?.level)}
+                  disabled={busyHere}
+                >
+                  ▶ Play{sel ? ` ${sel.name}` : ''}
                 </button>
-                <button type="button" className="btn" onClick={() => onPlay(s.id, 'practice')} disabled={busyHere}>
+                <button type="button" className="btn" onClick={() => onPlay(s.id, 'practice', sel?.level)} disabled={busyHere}>
                   🎯 Practice
                 </button>
                 <button

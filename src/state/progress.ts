@@ -1,4 +1,5 @@
 import type { RunResult } from '../engine/game';
+import { levelId } from '../engine/transcribe';
 
 export interface LessonRecord {
   stars: number;
@@ -113,4 +114,10 @@ export function recordResult(
 
 export function starsForLesson(p: Progress, lessonId: string): number {
   return p.lessons[lessonId]?.stars ?? 0;
+}
+
+/** a song's next level to work on: the first without stars, else the top one */
+export function nextSongLevel(p: Progress, songId: string, levels: { level: number }[]): number {
+  const open = levels.find((l) => (p.lessons[levelId(songId, l.level)]?.stars ?? 0) === 0);
+  return (open ?? levels[levels.length - 1])?.level ?? 1;
 }

@@ -34,8 +34,13 @@ Web MIDI). Kit setup maps pads to lanes; keyboard fallback is D F J K L ;.
    1 and the backbeat on 2 and 4.
 4. **Arrangement**: notes snap to a 16th grid built from the tracked beats,
    one per lane per slot, at most two hand drums at once.
-   Easy = kick + snare on 8ths, Medium adds hats and cymbals on 8ths,
-   Hard = full groove without ghost notes, Full = everything.
+5. **Levels**: every saved song keeps its analysis, and each level is
+   arranged from it on demand, each one containing the level below:
+   1 Pulse (kick + snare on the beat), 2 Backbeat (kick + snare on 8ths),
+   3 Groove (+ hats and crashes, 8ths), 4 Full kit (16ths, toms, fills),
+   5 Master (+ ghost notes). A level adding under 5% more notes than the one
+   below is hidden. Stars are tracked per level; the song card suggests the
+   first level without stars, and results offer the next level.
 
 In play, the highway clock is the backing track's playhead minus the
 device's output latency, so notes stay locked to what you hear at any

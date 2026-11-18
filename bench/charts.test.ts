@@ -7,6 +7,8 @@ import assert from 'node:assert/strict';
 import { buildSongs } from './songs';
 import { prf, scoreSong } from './score';
 import { analyzeSamples, arrangeChart } from '../src/engine/chart/pipeline';
+import { BeatGrid } from '../src/engine/chart/arrange';
+import { DEFAULT_SETTINGS, levelId, parseLevelId, songLevels } from '../src/engine/transcribe';
 import { loadModel } from './model';
 
 const songs = buildSongs();
@@ -57,12 +59,42 @@ test('bar 1 found on the songs with a backbeat', () => {
   assert.ok(ok >= 5, `${ok}/6 downbeats right`);
 });
 
-test('difficulty levels thin the chart in order and Easy is kick + snare on 8ths', () => {
+test('level ladder: each level contains the one below it', () => {
   for (const r of results) {
-    const counts = [1, 2, 3, 4].map((level) => arrangeChart(r.a, { level, sensitivity: 1 }).notes.length);
-    for (let i = 1; i < 4; i++) assert.ok(counts[i] >= counts[i - 1], `${r.song.name}: ${counts.join(' < ')}`);
-    const easy = arrangeChart(r.a, { level: 1, sensitivity: 1 }).notes;
-    assert.ok(easy.every((n) => n.lane === 'kick' || n.lane === 'snare'), `${r.song.name}: easy has other lanes`);
+    const lv = [1, 2, 3, 4, 5].map((level) => arrangeChart(r.a, { level, sensitivity: 1 }).notes);
+    const key = (n: { t: number; lane: string }) => `${n.t}:${n.lane}`;
+    for (let i = 1; i < 5; i++) {
+      const above = new Set(lv[i].map(key));
+      assert.ok(lv[i - 1].every((n) => above.has(key(n))), `${r.song.name}: level ${i} not inside level ${i + 1}`);
+    }
+    assert.ok(lv[0].every((n) => n.lane === 'kick' || n.lane === 'snare'), `${r.song.name}: Pulse has other lanes`);
+    assert.ok(lv[1].every((n) => n.lane === 'kick' || n.lane === 'snare'), `${r.song.name}: Backbeat has other lanes`);
+    assert.ok(lv[2].every((n) => n.lane !== 'tomLo' && n.lane !== 'tomHi'), `${r.song.name}: Groove has toms`);
+  }
+});
+
+test('Pulse sits on the beat, Backbeat and Groove on 8th notes', () => {
+  for (const r of results) {
+    const grid = new BeatGrid(r.a.beats, r.a.period);
+    const onGrid = (level: number, every: number) =>
+      arrangeChart(r.a, { level, sensitivity: 1 }).notes.every((n) => grid.slotAt(n.t) % every === 0);
+    assert.ok(onGrid(1, 4), `${r.song.name}: Pulse off the beat`);
+    assert.ok(onGrid(2, 2) && onGrid(3, 2), `${r.song.name}: 16ths below Full kit`);
+  }
+});
+
+test('songLevels: ids per level, easiest first, every shown level adds ≥ 5% notes', () => {
+  for (const r of results) {
+    const levels = songLevels(r.a, DEFAULT_SETTINGS, r.song.name, 'song-x');
+    assert.ok(levels.length >= 2, `${r.song.name}: only ${levels.length} levels`);
+    levels.forEach((l, i) => {
+      assert.equal(l.chart.id, levelId('song-x', l.level));
+      assert.deepEqual(parseLevelId(l.chart.id), { songId: 'song-x', level: l.level });
+      if (i > 0) {
+        assert.ok(l.level > levels[i - 1].level);
+        assert.ok(l.chart.notes.length >= levels[i - 1].chart.notes.length * 1.05, `${r.song.name}: level ${l.level} too close`);
+      }
+    });
   }
 });
 

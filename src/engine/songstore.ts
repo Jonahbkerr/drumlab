@@ -1,4 +1,6 @@
-import type { SongChart, SongSettings } from './transcribe';
+import type { ChartAnalysis } from './chart/pipeline';
+import { normalizeSettings, songLevels } from './transcribe';
+import type { LevelInfo, SongChart, SongSettings } from './transcribe';
 
 export interface StoredSong {
   id: string;
@@ -6,7 +8,10 @@ export interface StoredSong {
   createdAt: number;
   bytes: ArrayBuffer;
   settings: SongSettings;
+  /** chart at settings.level (what older code and the list read) */
   chart: SongChart;
+  /** drum hits + beats; every level is arranged from this on demand */
+  analysis?: ChartAnalysis;
 }
 
 export interface SongMeta {
@@ -18,6 +23,8 @@ export interface SongMeta {
   noteCount: number;
   /** charted by the drum model (has tracked beats); older charts should be re-charted */
   modern: boolean;
+  /** playable levels with their note counts (empty for single-chart songs) */
+  levels: (LevelInfo & { notes: number })[];
 }
 
 const DB_NAME = 'drumlab-db';
@@ -81,6 +88,14 @@ export async function listSongs(): Promise<SongMeta[]> {
               durationSec: s.chart.durationSec,
               noteCount: s.chart.notes.length,
               modern: Array.isArray(s.chart.beats),
+              levels: s.analysis
+                ? songLevels(s.analysis, normalizeSettings(s.settings), s.title, s.id).map((l) => ({
+                    level: l.level,
+                    name: l.name,
+                    blurb: l.blurb,
+                    notes: l.chart.notes.length,
+                  }))
+                : [],
             }))
             .sort((a, b) => b.createdAt - a.createdAt),
         );
