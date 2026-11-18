@@ -40,6 +40,14 @@ play screen's settings panel.
    1 and the backbeat on 2 and 4.
 4. **Arrangement**: notes snap to a 16th grid built from the tracked beats,
    one per lane per slot, at most two hand drums at once.
+   **Repeated bars agree**: soft notes near the threshold flicker in and out
+   from bar to bar, so the bars that repeat a bar's groove (same confident
+   notes) decide its uncertain notes together, by their average strength.
+   Two-bar patterns, pickups at the same place in every 4-bar phrase, loud
+   one-offs and fills are left alone (`bench/vote-check.ts` checks every
+   decision against the test songs' exact parts: no real note dropped).
+   `bench/consistency.ts song.mp3` measures how often a real song's bars
+   repeat exactly.
 5. **Levels**: every saved song keeps its analysis, and each level is
    arranged from it on demand, each one containing the level below:
    1 Pulse (kick + snare on the beat), 2 Backbeat (kick + snare on 8ths),

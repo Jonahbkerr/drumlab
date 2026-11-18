@@ -148,6 +148,6 @@ function splitToms(toms: { hit: Hit; frame: number }[], spec: { frames: number; 
 
 export function arrangeChart(a: ChartAnalysis, opts: ArrangeOpts): ArrangedChart {
   const grid = new BeatGrid(a.beats, a.period);
-  const notes = arrange(a.hits, grid, opts);
+  const notes = arrange(a.hits, grid, { downbeat: a.downbeat, ...opts });
   return { bpm: Math.round(600 / grid.period) / 10, beats: a.beats, downbeat: a.downbeat, notes };
 }

@@ -21,6 +21,8 @@ export interface ArrangeOpts {
   level: number;
   /** 0.5 – 2; higher keeps quieter hits */
   sensitivity: number;
+  /** beat index of bar 1, beat 1 (4/4). Given, repeated bars are made to agree. */
+  downbeat?: number;
 }
 
 export interface ChartNote {
@@ -80,14 +82,102 @@ export class BeatGrid {
 /** snare hits below this model probability count as ghost notes */
 const GHOST = 0.35;
 
+// ── repeated bars agree ──
+/** notes this far over their threshold identify a groove; a note's strength counts up to this */
+const SURE = 2;
+/** notes this far over their threshold are never dropped (one-off variations are often this loud) */
+const KEEP = 1.75;
+/** bars whose sure notes overlap at least this much (Jaccard) repeat the same groove */
+const PEER_SIM = 0.75;
+/** a bar needs this many repeats before they may change it (fills and intros have none) */
+const MIN_PEERS = 3;
+/** weakest candidate (share of its threshold) the repeats may pull into the chart */
+const PULL_IN = 0.45;
+
+/**
+ * Soft notes near the detection threshold flicker in and out from bar to bar,
+ * so one groove reads differently each time it repeats. For each bar, the
+ * bars repeating its groove (same sure notes) decide its uncertain notes
+ * together, by their average strength there (capped, so one loud outlier
+ * cannot carry it): below the threshold on average, a soft note is dropped;
+ * above it, a weaker candidate in this bar is kept. When the bars an even
+ * distance away and the bars an odd distance away disagree about a note, it
+ * belongs to a two-bar pattern and only the same-parity bars decide. A note
+ * the bars at the same place in a four-bar phrase nearly all have is never
+ * dropped, so pickups at the end of every phrase stay.
+ * Returns forced decisions per "slot:lane": true = keep, false = drop.
+ */
+export function consensus(hits: Hit[], grid: BeatGrid, sens: number, downbeat: number): Map<string, boolean> {
+  const first = Math.round(downbeat) * 4; // global slot of bar 0, beat 1
+  // per bar: strongest candidate per "lane@slot", as a share of its threshold
+  const bars = new Map<number, Map<string, number>>();
+  for (const h of hits) {
+    const rel = grid.slotAt(h.t) - first;
+    const bar = Math.floor(rel / 16);
+    const cell = `${h.lane}@${rel - bar * 16}`;
+    const r = (h.salience * sens) / h.need;
+    let m = bars.get(bar);
+    if (!m) bars.set(bar, (m = new Map()));
+    if ((m.get(cell) ?? 0) < r) m.set(cell, r);
+  }
+  const ids = [...bars.keys()];
+  const sure = new Map(ids.map((b) => [b, new Set([...bars.get(b)!].filter(([, r]) => r >= 1.5).map(([c]) => c))]));
+
+  const out = new Map<string, boolean>();
+  for (const b of ids) {
+    const mine = sure.get(b)!;
+    if (mine.size < 3) continue;
+    const peers: { m: Map<string, number>; even: boolean; phrase: boolean }[] = [];
+    for (const p of ids) {
+      if (p === b) continue;
+      const other = sure.get(p)!;
+      let inter = 0;
+      for (const c of mine) if (other.has(c)) inter++;
+      if (inter / (mine.size + other.size - inter) >= PEER_SIM) peers.push({ m: bars.get(p)!, even: (p - b) % 2 === 0, phrase: (p - b) % 4 === 0 });
+    }
+    if (peers.length < MIN_PEERS) continue;
+    const nEven = 1 + peers.filter((p) => p.even).length; // this bar counts as even
+    const nOdd = peers.length + 1 - nEven;
+    const nPhrase = 1 + peers.filter((p) => p.phrase).length;
+    const m = bars.get(b)!;
+    const cells = new Set(m.keys());
+    for (const p of peers) for (const [c, r] of p.m) if (r >= 1) cells.add(c);
+    for (const cell of cells) {
+      const own = m.get(cell) ?? 0;
+      let even = Math.min(own, SURE);
+      let odd = 0;
+      let phraseHas = own >= 1 ? 1 : 0;
+      for (const p of peers) {
+        const r = Math.min(p.m.get(cell) ?? 0, SURE);
+        if (p.even) even += r;
+        else odd += r;
+        if (p.phrase && r >= 1) phraseHas++;
+      }
+      const evenMean = even / nEven;
+      const twoBar = nOdd > 0 && evenMean >= 1 !== odd / nOdd >= 1;
+      const group = twoBar ? evenMean : (even + odd) / (nEven + nOdd);
+      // dropping needs every view to agree: all repeats, same parity, same place in the phrase
+      const phrasePart = nPhrase >= 2 && phraseHas / nPhrase >= 0.75;
+      const absent = group < 1 && evenMean < 1 && !phrasePart;
+      const at = cell.indexOf('@');
+      const key = `${first + b * 16 + Number(cell.slice(at + 1))}:${cell.slice(0, at)}`;
+      if (own >= 1 && own < KEEP && absent) out.set(key, false);
+      else if (own < 1 && own >= PULL_IN && group >= 1) out.set(key, true);
+    }
+  }
+  return out;
+}
+
 export function arrange(hits: Hit[], grid: BeatGrid, opts: ArrangeOpts): ChartNote[] {
   const sens = Math.max(0.3, opts.sensitivity);
-  // 1. threshold + one note per lane per 16th slot (strongest wins)
+  const forced = opts.downbeat === undefined ? null : consensus(hits, grid, sens, opts.downbeat);
+  // 1. threshold (or the repeats' vote) + one note per lane per 16th slot (strongest wins)
   const bySlot = new Map<string, { slot: number; hit: Hit }>();
   for (const h of hits) {
-    if (h.salience < h.need / sens) continue;
     const slot = grid.slotAt(h.t);
     const key = `${slot}:${h.lane}`;
+    const vote = forced?.get(key);
+    if (vote === false || (vote !== true && h.salience < h.need / sens)) continue;
     const prev = bySlot.get(key);
     if (!prev || prev.hit.salience < h.salience) bySlot.set(key, { slot, hit: h });
   }
