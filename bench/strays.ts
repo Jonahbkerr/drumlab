@@ -1,11 +1,18 @@
 /** list the notes that make near-repeat bars differ, with their strength over threshold
- *   npx tsx bench/strays.ts <audio> [level] */
+ *   npx tsx bench/strays.ts <audio> [level]      (MODE=stem or MODE=hybrid: drum stem analyses) */
 import { basename } from 'node:path';
 import { BeatGrid } from '../src/engine/chart/arrange';
-import { barSets, cachedAnalysis } from './realsong';
+import { barSets, cachedAnalysis, cachedStemAnalysis } from './realsong';
+import { mergeStem } from '../src/engine/chart/pipeline';
 
 const [file, lv] = process.argv.slice(2);
-const a = await cachedAnalysis(file);
+const mode = process.env.MODE ?? 'mix';
+const a =
+  mode === 'stem'
+    ? await cachedStemAnalysis(file)
+    : mode === 'hybrid'
+      ? mergeStem(await cachedAnalysis(file), await cachedStemAnalysis(file))
+      : await cachedAnalysis(file);
 const bars = barSets(a, Number(lv ?? 4));
 const grid = new BeatGrid(a.beats, a.period);
 const r = (bar: number, cell: string) => {
@@ -33,4 +40,4 @@ for (let b = 1; b < bars.length; b++) {
     if (process.env.V) console.log(`bar ${b}: ${best.diff.join(' ')}`);
   }
 }
-console.log(basename(file), JSON.stringify(tally));
+console.log(basename(file), mode, JSON.stringify(tally));

@@ -26,6 +26,39 @@ play screen's settings panel.
 
 `src/engine/chart/`
 
+0. **Drum separation** (on by default, "Separate the drums first" on import):
+   Demucs v4 (`htdemucs_ft` drums specialist, Meta, MIT) separates the drums
+   from the music, and kick, snare and toms are read from that drum stem,
+   where guitars, bass and vocals cannot pass for drums. Hi-hats, cymbals,
+   tempo and bars still come from the full mix, where cymbal attacks are
+   intact (`mergeStem` in `pipeline.ts`). The import preview appears from
+   the full mix in seconds and sharpens when separation is done; a song saved
+   earlier is updated when it finishes. Re-chart separates existing songs.
+   - Model: `htdemucs_ft_drums_safe16.onnx` (88 MB, an onnxruntime-web
+     export by monteslu/htdemucs-ft-webgpu on Hugging Face), downloaded once,
+     checked against its SHA-256 and kept in Cache Storage. Dev builds use
+     `local/models/demucs/` first if it holds a copy.
+   - The ONNX graph is the network only; `demucs.ts` does Demucs' own
+     spectrogram and inverse (exact to 160 dB, `bench/demucs.test.ts`) and
+     the 7.8 s overlapping segments.
+   - Speed: on WebGPU about 0.9 s per 7.8 s segment (a 2:35 song imported,
+     separated and charted in 30 s on an M-series Mac). The model is fp16 and
+     two parts of it break on WebGPU (the input normalization overflows; the
+     time decoder's 1-D transposed convolutions come out wrong), so those 20
+     nodes run on the CPU (`DEMUCS_CPU_NODES`), and on first use the worker
+     checks one test segment on GPU and CPU and only uses the GPU if they
+     agree. Without a usable GPU: CPU with 8 threads, about real time.
+     The worker uses onnxruntime-web's WebGPU build for both models (its
+     wasm is 6.9 MB gzipped, 3.3 MB more than the CPU-only one; fetched once,
+     when a song is first imported).
+     Threads need cross-origin isolation, which `vite.config.ts` turns on
+     (COOP same-origin, COEP credentialless); any host serving DrumLab needs
+     the same two headers.
+   - Measured: on the test songs, kick 100, snare 98→99, hi-hat 96, crash
+     95 (stem alone loses cymbals: crash 81). In In The End's verse the
+     stem finds the second kick of every bar that the full mix dropped in 5
+     of 8 bars. `npx tsx bench/run.ts hybrid` (needs the local model),
+     `bench/stem-songs.ts` and `bench/compare-bars.ts` compare real songs.
 1. **Drum model**: ADTOF Frame_RNN (CNN + 3 bidirectional GRUs) turns a
    log-filtered spectrogram (100 frames/s, 84 bands) into per-frame
    probabilities for kick, snare, tom, hi-hat, cymbal. It runs with

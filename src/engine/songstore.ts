@@ -12,6 +12,8 @@ export interface StoredSong {
   chart: SongChart;
   /** drum hits + beats; every level is arranged from this on demand */
   analysis?: ChartAnalysis;
+  /** kick, snare and toms were read from a separated drum stem */
+  stems?: boolean;
 }
 
 export interface SongMeta {
@@ -25,6 +27,8 @@ export interface SongMeta {
   modern: boolean;
   /** playable levels with their note counts (empty for single-chart songs) */
   levels: (LevelInfo & { notes: number })[];
+  /** charted from a separated drum stem */
+  stems: boolean;
 }
 
 const DB_NAME = 'drumlab-db';
@@ -88,6 +92,7 @@ export async function listSongs(): Promise<SongMeta[]> {
               durationSec: s.chart.durationSec,
               noteCount: s.chart.notes.length,
               modern: Array.isArray(s.chart.beats),
+              stems: !!s.stems,
               levels: s.analysis
                 ? songLevels(s.analysis, normalizeSettings(s.settings), s.title, s.id).map((l) => ({
                     level: l.level,

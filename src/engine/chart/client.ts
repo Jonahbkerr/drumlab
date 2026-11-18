@@ -48,6 +48,24 @@ export function analyzeInWorker(
   const id = ++seq;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject, onProgress });
-    w.postMessage({ id, samples, bpm: opts.bpm }, [samples.buffer]);
+    w.postMessage({ id, kind: 'analyze', samples, bpm: opts.bpm }, [samples.buffer]);
+  });
+}
+
+/**
+ * Separate the drums from a stereo 44.1 kHz mix (Demucs) and analyze the drum
+ * stem. Stages: 'download' (the model, first time only), 'separate', then the
+ * analysis stages. The sample buffers are transferred.
+ */
+export function analyzeStemInWorker(
+  left: Float32Array,
+  right: Float32Array,
+  onProgress?: (stage: string, p: number) => void,
+): Promise<ChartAnalysis> {
+  const w = getWorker();
+  const id = ++seq;
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject, onProgress });
+    w.postMessage({ id, kind: 'stem', left, right }, [left.buffer, right.buffer]);
   });
 }

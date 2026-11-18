@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { analyzeInWorker } from '../engine/chart/client';
+import { analyzeInWorker, analyzeStemInWorker } from '../engine/chart/client';
+import { mergeStem } from '../engine/chart/pipeline';
 import type { ChartAnalysis } from '../engine/chart/pipeline';
 import type { GameMode } from '../engine/game';
 import { deleteSong, getSong, listSongs, putSong } from '../engine/songstore';
@@ -38,6 +39,41 @@ interface Working {
   autoBpm: number;
   settings: SongSettings;
   levels: SongLevel[];
+  /** full-mix analysis; `base` becomes mix + drum stem once separation is done */
+  mix: ChartAnalysis | null;
+  stems: StemState;
+}
+
+type StemState = 'off' | 'running' | 'done' | 'failed';
+
+const SEPARATE_KEY = 'drumlab:separate';
+const readSeparate = () => {
+  try {
+    return localStorage.getItem(SEPARATE_KEY) !== '0';
+  } catch {
+    return true;
+  }
+};
+
+/** separation jobs by song id, so a song saved mid-separation can be updated when it ends */
+const stemJobs = new Map<string, Promise<ChartAnalysis>>();
+
+const STEM_STAGE: Record<string, string> = {
+  mix: 'Reading the full mix',
+  download: 'Downloading the separation model (88 MB, first time only)',
+  prepare: 'Preparing drum separation',
+  separate: 'Separating the drums from the music',
+};
+const stageLabel = (stage: string) => STEM_STAGE[stage] ?? 'Reading the separated drums';
+
+/** start separating the drums of a decoded song; resolves to mix + stem merged */
+function startStems(id: string, buffer: AudioBuffer, mix: ChartAnalysis, onProgress: (stage: string, p: number) => void) {
+  const left = buffer.getChannelData(0).slice();
+  const right = (buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : buffer.getChannelData(0)).slice();
+  const job = analyzeStemInWorker(left, right, onProgress).then((stem) => mergeStem(mix, stem));
+  stemJobs.set(id, job);
+  void job.finally(() => stemJobs.delete(id)).catch(() => {});
+  return job;
 }
 
 const fmtSec = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -49,6 +85,16 @@ export default function SongLibrary({ progress, onPlay }: Props) {
   const [stage, setStage] = useState<{ stage: string; p: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recharting, setRecharting] = useState<string | null>(null);
+  const [separate, setSeparate] = useState(readSeparate);
+  /** drum separation progress, for the import panel and song rows */
+  const [stemProgress, setStemProgress] = useState<Record<string, { stage: string; p: number }>>({});
+  const stemProg = (id: string) => (stage: string, p: number) => setStemProgress((m) => ({ ...m, [id]: { stage, p } }));
+  const stemEnd = (id: string) =>
+    setStemProgress((m) => {
+      const next = { ...m };
+      delete next[id];
+      return next;
+    });
   const [bpmText, setBpmText] = useState('');
   /** level picked on each song card (defaults to the next one to beat) */
   const [picked, setPicked] = useState<Record<string, number>>({});
@@ -73,13 +119,25 @@ export default function SongLibrary({ progress, onPlay }: Props) {
       setBusy('Decoding');
       setStage(null);
       const buffer = await decodeAudioFile(f);
-      setWorking({ id, createdAt, name, file: f, base: null, autoBpm: 0, settings: DEFAULT_SETTINGS, levels: [] });
+      const stems: StemState = separate ? 'running' : 'off';
+      setWorking({ id, createdAt, name, file: f, base: null, autoBpm: 0, settings: DEFAULT_SETTINGS, levels: [], mix: null, stems });
       setBusy('Analyzing');
       const a = await analyzeInWorker(monoSamples(buffer), {}, (s, p) => setStage({ stage: s, p }));
       const levels = songLevels(a, DEFAULT_SETTINGS, name, id);
       const autoBpm = levels[0]?.chart.bpm ?? 0;
-      setWorking({ id, createdAt, name, file: f, base: a, autoBpm, settings: DEFAULT_SETTINGS, levels });
+      setWorking({ id, createdAt, name, file: f, base: a, autoBpm, settings: DEFAULT_SETTINGS, levels, mix: a, stems });
       setBpmText(String(autoBpm));
+      // the full-mix chart is ready to preview now; the cleaner one follows
+      if (separate) {
+        startStems(id, buffer, a, stemProg(id))
+          .then((merged) =>
+            setWorking((w) =>
+              w && w.id === id ? { ...w, base: merged, levels: songLevels(merged, w.settings, w.name, w.id), stems: 'done' } : w,
+            ),
+          )
+          .catch(() => setWorking((w) => (w && w.id === id ? { ...w, stems: 'failed' } : w)))
+          .finally(() => stemEnd(id));
+      }
     } catch (e) {
       setWorking(null);
       setError(
@@ -126,7 +184,7 @@ export default function SongLibrary({ progress, onPlay }: Props) {
   const save = async (): Promise<{ id: string; level: number } | null> => {
     if (!working?.base || !preview) return null;
     setBusy('Saving');
-    const { id, createdAt, name, base, settings } = working;
+    const { id, createdAt, name, base, settings, stems } = working;
     const level = preview.level;
     await putSong({
       id,
@@ -136,11 +194,26 @@ export default function SongLibrary({ progress, onPlay }: Props) {
       settings: { ...settings, level },
       chart: { ...preview.chart, id },
       analysis: base,
+      stems: stems === 'done',
     });
+    // saved before the drums were separated: finish in the background
+    const job = stems === 'running' ? stemJobs.get(id) : undefined;
+    if (job) void job.then((merged) => applyStems(id, merged)).catch(() => {});
     setWorking(null);
     setBusy(null);
     refresh();
     return { id, level };
+  };
+
+  /** store a song's mix + stem analysis and its re-arranged chart */
+  const applyStems = async (id: string, merged: ChartAnalysis) => {
+    const stored = await getSong(id);
+    if (!stored) return;
+    const settings = normalizeSettings(stored.settings);
+    const lv = pickLevel(songLevels(merged, settings, stored.title, id), settings.level);
+    if (!lv) return;
+    await putSong({ ...stored, settings, chart: { ...lv.chart, id }, analysis: merged, stems: true });
+    refresh();
   };
 
   const rechart = async (id: string) => {
@@ -150,16 +223,18 @@ export default function SongLibrary({ progress, onPlay }: Props) {
       const stored = await getSong(id);
       if (!stored) return;
       const buffer = await decodeAudioBytes(stored.bytes);
-      const a = await analyzeInWorker(monoSamples(buffer));
+      const mix = await analyzeInWorker(monoSamples(buffer), {}, (_s, p) => stemProg(id)('mix', p));
+      const a = separate ? await startStems(id, buffer, mix, stemProg(id)) : mix;
       const settings = normalizeSettings(stored.settings);
       const lv = pickLevel(songLevels(a, settings, stored.title, id), settings.level);
       if (!lv) throw new Error('no drums found');
-      await putSong({ ...stored, settings, chart: { ...lv.chart, id }, analysis: a });
+      await putSong({ ...stored, settings, chart: { ...lv.chart, id }, analysis: a, stems: separate });
       refresh();
     } catch (e) {
       setError(`Re-chart failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setRecharting(null);
+      stemEnd(id);
     }
   };
 
@@ -230,6 +305,22 @@ export default function SongLibrary({ progress, onPlay }: Props) {
             </div>
           )}
 
+          {preview && working.stems === 'running' && (
+            <div className="analyze stem-status" role="status">
+              <div className="analyze-label">
+                <span>
+                  {stageLabel(stemProgress[working.id]?.stage ?? 'prepare')}… <span className="faint">The preview below sharpens when it is done; you can save now.</span>
+                </span>
+                <span className="mono">{Math.round((stemProgress[working.id]?.p ?? 0) * 100)}%</span>
+              </div>
+              <div className="meter">
+                <span style={{ width: `${Math.max(2, Math.round((stemProgress[working.id]?.p ?? 0) * 100))}%` }} />
+              </div>
+            </div>
+          )}
+          {preview && working.stems === 'done' && <p className="stem-done">Drums separated from the music: kick, snare and toms are read from the drum stem.</p>}
+          {preview && working.stems === 'failed' && <p className="notice">Drum separation failed; this chart is from the full mix.</p>}
+
           {preview && (
             <>
               <div className="import-grid">
@@ -293,6 +384,26 @@ export default function SongLibrary({ progress, onPlay }: Props) {
                         </button>
                       )}
                     </span>
+                  </label>
+                  <label className="check">
+                    <span>
+                      Separate the drums first
+                      <span className="field-hint" style={{ display: 'block' }}>
+                        Cleaner kicks and snares. Adds about 30 s per song with graphics acceleration, up to the song's length without. The model (88 MB) downloads once.
+                      </span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={separate}
+                      onChange={(e) => {
+                        setSeparate(e.target.checked);
+                        try {
+                          localStorage.setItem(SEPARATE_KEY, e.target.checked ? '1' : '0');
+                        } catch {
+                          // private mode: the choice lasts this session
+                        }
+                      }}
+                    />
                   </label>
                   <label className="field">
                     <span>
@@ -375,6 +486,13 @@ export default function SongLibrary({ progress, onPlay }: Props) {
                       <span className="warn"> · charted before levels; re-chart to get them</span>
                     )}
                   </div>
+                  {stemProgress[s.id] ? (
+                    <div className="song-stem mono">
+                      {stageLabel(stemProgress[s.id].stage)} · {Math.round(stemProgress[s.id].p * 100)}%
+                    </div>
+                  ) : (
+                    hasLevels && !s.stems && <div className="song-stem">Full mix · re-chart to separate the drums</div>
+                  )}
                 </div>
 
                 {hasLevels && sel ? (
@@ -411,7 +529,7 @@ export default function SongLibrary({ progress, onPlay }: Props) {
                     onClick={() => void rechart(s.id)}
                     disabled={recharting !== null}
                     aria-label={`Re-chart ${s.title}`}
-                    title={busyHere ? 'Re-charting…' : 'Transcribe again with the current drum model'}
+                    title={busyHere ? 'Re-charting…' : separate ? 'Transcribe again, separating the drums first' : 'Transcribe again with the current drum model'}
                   >
                     <Icon name="refresh" />
                   </button>
@@ -435,7 +553,8 @@ export default function SongLibrary({ progress, onPlay }: Props) {
       )}
 
       <p className="credit">
-        Drum detection: ADTOF model (Zehren, Alunno & Bientinesi, 2023), CC BY-NC-SA 4.0. Audio never leaves this computer.
+        Drum detection: ADTOF model (Zehren, Alunno & Bientinesi, 2023), CC BY-NC-SA 4.0. Drum separation: Demucs v4 (Meta, MIT),
+        downloaded once from Hugging Face. Audio never leaves this computer.
       </p>
     </>
   );

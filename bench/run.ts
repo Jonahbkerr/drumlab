@@ -5,14 +5,19 @@
  *   npx tsx bench/run.ts            # compare legacy vs current
  *   npx tsx bench/run.ts current    # one generator
  *   npx tsx bench/run.ts current funk   # one song
+ *   npx tsx bench/run.ts stems          # on the Demucs drum stem (local model)
+ *   npx tsx bench/run.ts hybrid         # stem for kick/snare/toms, mix for the rest
  */
 import { buildSongs } from './songs';
 import { SCORED, prf, scoreSong } from './score';
 import type { BenchNote, LaneScore, ScoredLane } from './score';
 import { SR } from './synth';
 import { generateChart as legacyChart } from './legacy-transcribe';
-import { analyzeSamples, arrangeChart } from '../src/engine/chart/pipeline';
-import { loadModel } from './model';
+import { analyzeSamples, arrangeChart, mergeStem } from '../src/engine/chart/pipeline';
+import type { ChartAnalysis } from '../src/engine/chart/pipeline';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { loadDemucs, loadModel, setThreads } from './model';
+import { separateDrums } from '../src/engine/chart/demucs';
 
 type Gen = (samples: Float32Array, sr: number) => Promise<{ bpm: number; notes: BenchNote[]; barStart?: number }>;
 
@@ -31,12 +36,39 @@ export const GENERATORS: Record<string, Gen> = {
     const c = legacyChart(fakeBuffer(s, sr), { bpm: 0, threshold: 1, density: 0.55 });
     return { bpm: c.bpm, notes: c.notes };
   },
+  /** drum detection on the Demucs drum stem instead of the full mix */
+  stems: async (s) => {
+    const a = await stemAnalysis(s);
+    const c = arrangeChart(a, { level: Number(process.env.LEVEL ?? 4), sensitivity: Number(process.env.SENS ?? 1) });
+    return { bpm: c.bpm, notes: c.notes, barStart: c.beats[c.downbeat] };
+  },
+  /** full mix for tempo, bars and cymbals; drum stem for kick, snare, toms */
+  hybrid: async (s) => {
+    const a = mergeStem(await analyzeSamples(s, await loadModel()), await stemAnalysis(s));
+    const c = arrangeChart(a, { level: Number(process.env.LEVEL ?? 4), sensitivity: Number(process.env.SENS ?? 1) });
+    return { bpm: c.bpm, notes: c.notes, barStart: c.beats[c.downbeat] };
+  },
   current: async (s) => {
     const a = await analyzeSamples(s, await loadModel());
     const c = arrangeChart(a, { level: Number(process.env.LEVEL ?? 4), sensitivity: Number(process.env.SENS ?? 1) });
     return { bpm: c.bpm, notes: c.notes, barStart: c.beats[c.downbeat] };
   },
 };
+
+/** stem analyses are slow (Demucs); cache them per rendered song in local/cache */
+async function stemAnalysis(s: Float32Array): Promise<ChartAnalysis> {
+  let h = s.length;
+  for (let i = 0; i < s.length; i += 997) h = (h * 31 + Math.round(s[i] * 1e6)) | 0;
+  const path = `local/cache/bench-${(h >>> 0).toString(16)}.stem.analysis.json`;
+  if (existsSync(path)) {
+    const a = JSON.parse(readFileSync(path, 'utf8'));
+    return { ...a, novelty: Float32Array.from(Object.values(a.novelty ?? {})) };
+  }
+  const a = await analyzeSamples(await separateDrums(await loadDemucs(), s, s), await loadModel());
+  mkdirSync('local/cache', { recursive: true });
+  writeFileSync(path, JSON.stringify(a));
+  return a;
+}
 
 const pct = (x: number) => `${Math.round(x * 100)}`.padStart(3);
 
@@ -91,6 +123,8 @@ const isMain = process.argv[1]?.endsWith('run.ts');
 if (isMain) {
   const which = process.argv[2];
   const song = process.argv[3];
-  const names = which ? [which] : Object.keys(GENERATORS);
+  // stems needs the downloaded Demucs model and minutes per song: only when asked
+  const names = which ? [which] : ['legacy', 'current'];
+  if (names.includes('stems') || names.includes('hybrid')) setThreads(8);
   for (const n of names) await runOne(n, GENERATORS[n], song);
 }

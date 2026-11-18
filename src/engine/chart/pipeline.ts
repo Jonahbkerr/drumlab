@@ -146,6 +146,22 @@ function splitToms(toms: { hit: Hit; frame: number }[], spec: { frames: number; 
   toms.forEach((t, i) => (t.hit.lane = cs[i] >= mid ? 'tomHi' : 'tomLo'));
 }
 
+/** drums read from the separated drum stem; the rest comes from the full mix */
+export const STEM_LANES: Lane[] = ['kick', 'snare', 'tomLo', 'tomHi'];
+
+/**
+ * One analysis from two: tempo, bars and cymbals from the full mix (where
+ * cymbal attacks are intact), kick, snare and toms from the drum stem (where
+ * guitars, bass and vocals cannot pass for drums).
+ */
+export function mergeStem(mix: ChartAnalysis, stem: ChartAnalysis, lanes: Lane[] = STEM_LANES): ChartAnalysis {
+  const fromStem = new Set(lanes);
+  return {
+    ...mix,
+    hits: [...mix.hits.filter((h) => !fromStem.has(h.lane)), ...stem.hits.filter((h) => fromStem.has(h.lane))].sort((a, b) => a.t - b.t),
+  };
+}
+
 export function arrangeChart(a: ChartAnalysis, opts: ArrangeOpts): ArrangedChart {
   const grid = new BeatGrid(a.beats, a.period);
   const notes = arrange(a.hits, grid, { downbeat: a.downbeat, ...opts });

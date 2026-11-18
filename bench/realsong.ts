@@ -10,13 +10,37 @@ import { decodeFile } from './audio';
 import { BeatGrid } from '../src/engine/chart/arrange';
 import { analyzeSamples, arrangeChart } from '../src/engine/chart/pipeline';
 import type { ChartAnalysis } from '../src/engine/chart/pipeline';
-import { loadModel } from './model';
+import { decodeStereo } from './audio';
+import { loadDemucs, loadModel } from './model';
+import { separateDrums } from '../src/engine/chart/demucs';
 
 export async function cachedAnalysis(file: string): Promise<ChartAnalysis> {
   const dir = 'local/cache';
   const path = `${dir}/${basename(file)}.analysis.json`;
   if (existsSync(path)) return JSON.parse(readFileSync(path, 'utf8'));
   const a = await analyzeSamples(decodeFile(file, 44100), await loadModel());
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path, JSON.stringify(a));
+  return a;
+}
+
+/** the same, run on the Demucs drum stem; logs how long the separation took */
+export async function cachedStemAnalysis(file: string): Promise<ChartAnalysis> {
+  const dir = 'local/cache';
+  const path = `${dir}/${basename(file)}.stem.analysis.json`;
+  if (existsSync(path)) return JSON.parse(readFileSync(path, 'utf8'));
+  const [l, r] = decodeStereo(file, 44100);
+  const t0 = performance.now();
+  let last = 0;
+  const drums = await separateDrums(await loadDemucs(), l, r, (p) => {
+    if (p - last >= 0.25 || p === 1) {
+      last = p;
+      process.stderr.write(`  ${basename(file)}: separating ${Math.round(p * 100)}%\n`);
+    }
+  });
+  const secs = (performance.now() - t0) / 1000;
+  process.stderr.write(`  ${basename(file)}: ${(l.length / 44100).toFixed(0)} s of audio separated in ${secs.toFixed(0)} s\n`);
+  const a = await analyzeSamples(drums, await loadModel());
   mkdirSync(dir, { recursive: true });
   writeFileSync(path, JSON.stringify(a));
   return a;
