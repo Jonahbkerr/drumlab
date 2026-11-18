@@ -20,11 +20,11 @@ import type { Progress } from '../state/progress';
 import { LANE_LABEL } from '../engine/types';
 import type { Lane } from '../engine/types';
 import ChartPreview from './ChartPreview';
+import Icon from './Icon';
 import Stars from './Stars';
 
 interface Props {
   progress: Progress;
-  onBack: () => void;
   onPlay: (songId: string, mode: GameMode, level?: number) => void;
 }
 
@@ -42,7 +42,7 @@ interface Working {
 
 const fmtSec = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
-export default function SongLibrary({ progress, onBack, onPlay }: Props) {
+export default function SongLibrary({ progress, onPlay }: Props) {
   const [songs, setSongs] = useState<SongMeta[]>([]);
   const [working, setWorking] = useState<Working | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -172,111 +172,132 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
   const analyzing = busy === 'Decoding' || busy === 'Analyzing';
   const pct = stage ? Math.round(stage.p * 100) : 0;
 
+  const fileInput = (
+    <input
+      ref={fileRef}
+      type="file"
+      accept="audio/*,.mp3,.m4a,.wav,.ogg,.flac"
+      hidden
+      onChange={(e) => {
+        void onFile(e.target.files?.[0] ?? null);
+        e.target.value = '';
+      }}
+    />
+  );
+
   return (
-    <div className="app">
-      <div className="view-head">
-        <button type="button" className="back-link" onClick={onBack}>
-          ← Back
-        </button>
+    <>
+      <div className="page-head">
         <div>
-          <h2 style={{ fontSize: 26 }}>🎧 My songs</h2>
-          <p style={{ color: 'var(--muted)', fontSize: 14, margin: '4px 0 0' }}>
-            Import any track: the drum part is transcribed on your machine and becomes a ladder of levels, from the
-            pulse to the full part.
-          </p>
+          <h1>Songs</h1>
+          <p>Import a track and the drum part is transcribed on this computer, then laid out as levels from the pulse to the full part.</p>
         </div>
+        {!working && (
+          <button type="button" className="btn btn-primary" onClick={() => fileRef.current?.click()}>
+            <Icon name="upload" />
+            Import song
+          </button>
+        )}
+        {fileInput}
       </div>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="audio/*,.mp3,.m4a,.wav,.ogg,.flac"
-          style={{ display: 'none' }}
-          onChange={(e) => {
-            void onFile(e.target.files?.[0] ?? null);
-            e.target.value = '';
-          }}
-        />
-        {!working ? (
-          <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="button" className="btn primary big" onClick={() => fileRef.current?.click()}>
-              ＋ Import a song (MP3 / M4A / WAV)
-            </button>
-            <span style={{ color: 'var(--muted)', fontSize: 13.5 }}>
-              Finds kick, snare, hats, toms and cymbals, follows the beat, then builds levels you can climb.
-            </span>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <b style={{ fontSize: 16 }}>{working.name}</b>
-              <button type="button" className="btn ghost" onClick={() => setWorking(null)} disabled={analyzing}>
-                ✕ Cancel
-              </button>
+      {working && (
+        <section className="surface import-panel" aria-label="Import">
+          <div className="import-head">
+            <div>
+              <h2>{working.name}</h2>
+              {preview && (
+                <p className="faint" style={{ fontSize: 12.5, marginTop: 2 }}>
+                  <span className="mono">{fmtSec(preview.chart.durationSec)}</span> ·{' '}
+                  <span className="mono">{preview.chart.bpm}</span> bpm · {working.levels.length} levels
+                </p>
+              )}
             </div>
+            <button type="button" className="btn btn-quiet btn-icon" aria-label="Cancel import" onClick={() => setWorking(null)} disabled={analyzing}>
+              <Icon name="close" />
+            </button>
+          </div>
 
-            {analyzing && (
-              <div className="analyze-progress" role="status">
-                <div className="analyze-label">
-                  <span>{stage?.stage ?? (busy === 'Decoding' ? 'Decoding audio' : 'Loading the drum model')}…</span>
-                  <span>{stage ? `${pct}%` : ''}</span>
-                </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: `${stage ? pct : 4}%` }} />
-                </div>
+          {analyzing && (
+            <div className="analyze" role="status">
+              <div className="analyze-label">
+                <span>{stage?.stage ?? (busy === 'Decoding' ? 'Decoding audio' : 'Loading the drum model')}…</span>
+                <span className="mono">{stage ? `${pct}%` : ''}</span>
               </div>
-            )}
+              <div className="meter">
+                <span style={{ width: `${stage ? pct : 3}%` }} />
+              </div>
+            </div>
+          )}
 
-            {preview && (
-              <>
-                <div className="ctl-row">
-                  {working.levels.length} levels: every one is saved, preview any of them
-                  <div className="mode-switch level-switch">
+          {preview && (
+            <>
+              <div className="import-grid">
+                <div>
+                  <div className="seg" role="group" aria-label="Preview level">
                     {working.levels.map((l) => (
-                      <button
-                        key={l.level}
-                        type="button"
-                        className={`btn${preview.level === l.level ? ' active' : ''}`}
-                        onClick={() => update({ level: l.level })}
-                        title={l.blurb}
-                      >
-                        <span className="level-num">{l.level}</span> {l.name}
+                      <button key={l.level} type="button" aria-pressed={preview.level === l.level} onClick={() => update({ level: l.level })}>
+                        <span className="num">{l.level}</span>
+                        {l.name}
                       </button>
                     ))}
                   </div>
-                  <span style={{ fontWeight: 500, fontSize: 12.5 }}>{preview.blurb}</span>
+                  <p className="level-blurb">
+                    {preview.blurb}. Every level is saved; this is just a preview.
+                  </p>
+                  <div style={{ marginTop: 14 }}>
+                    <ChartPreview chart={preview.chart} />
+                  </div>
+                  <div className="import-stats" style={{ marginTop: 12 }}>
+                    <span>
+                      <b className="mono" style={{ color: 'var(--text)' }}>
+                        {preview.chart.notes.length}
+                      </b>{' '}
+                      notes · <span className="mono">{(preview.chart.notes.length / preview.chart.durationSec).toFixed(1)}</span>/s
+                    </span>
+                    {Object.entries(laneCounts(preview.chart)).map(([lane, c]) => (
+                      <span key={lane}>
+                        <span className="dot" style={{ background: `var(--${lane.toLowerCase()})` }} />
+                        {LANE_LABEL[lane as Lane] ?? lane} <span className="mono faint">{c}</span>
+                      </span>
+                    ))}
+                  </div>
                 </div>
 
-                <ChartPreview chart={preview.chart} />
-
-                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                  <label className="ctl-row" style={{ flex: 1, minWidth: 150 }}>
-                    Tempo (BPM){working.settings.bpm === 0 ? ' · detected' : ' · set by you'}
-                    <input
-                      type="number"
-                      className="ctl"
-                      min={40}
-                      max={260}
-                      step={0.1}
-                      value={bpmText}
-                      onChange={(e) => setBpmText(e.target.value)}
-                      onBlur={commitBpm}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') commitBpm();
-                      }}
-                    />
+                <div className="import-side">
+                  <label className="field">
+                    <span>
+                      Tempo <span className="field-hint">{working.settings.bpm === 0 ? 'detected' : 'set by you'}</span>
+                    </span>
+                    <span style={{ display: 'flex', gap: 6 }}>
+                      <input
+                        type="number"
+                        className="input mono"
+                        style={{ flex: 1, minWidth: 0 }}
+                        min={40}
+                        max={260}
+                        step={0.1}
+                        value={bpmText}
+                        onChange={(e) => setBpmText(e.target.value)}
+                        onBlur={commitBpm}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitBpm();
+                        }}
+                      />
+                      <button type="button" className="btn" onClick={tap} title="Tap along to the beat 4 or more times">
+                        Tap
+                      </button>
+                      {working.settings.bpm !== 0 && (
+                        <button type="button" className="btn btn-quiet" onClick={() => update({ bpm: 0 })} title={`Back to the detected ${working.autoBpm} bpm`}>
+                          Auto
+                        </button>
+                      )}
+                    </span>
                   </label>
-                  <button type="button" className="btn" onClick={tap} title="Tap along to the beat 4+ times">
-                    👆 Tap
-                  </button>
-                  {working.settings.bpm !== 0 && (
-                    <button type="button" className="btn ghost" onClick={() => update({ bpm: 0 })}>
-                      Auto ({working.autoBpm})
-                    </button>
-                  )}
-                  <label className="ctl-row" style={{ flex: 2, minWidth: 200 }}>
-                    Sensitivity: {working.settings.sensitivity.toFixed(2)}×
+                  <label className="field">
+                    <span>
+                      Sensitivity <span className="field-hint mono">{working.settings.sensitivity.toFixed(2)}×</span>
+                    </span>
                     <input
                       type="range"
                       min={50}
@@ -285,144 +306,137 @@ export default function SongLibrary({ progress, onBack, onPlay }: Props) {
                       value={Math.round(working.settings.sensitivity * 100)}
                       onChange={(e) => update({ sensitivity: Number(e.target.value) / 100 })}
                     />
-                    <span className="vals">
-                      <span>fewer, surer hits</span>
-                      <span>quieter hits too</span>
+                    <span className="range-ends">
+                      <span>Fewer, surer hits</span>
+                      <span>Quieter hits too</span>
                     </span>
                   </label>
                 </div>
+              </div>
 
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <span className="pill">
-                    {preview.chart.notes.length} notes · {(preview.chart.notes.length / preview.chart.durationSec).toFixed(1)}/s
-                  </span>
-                  {Object.entries(laneCounts(preview.chart)).map(([lane, c]) => (
-                    <span key={lane} className="pill" style={{ color: `var(--${lane.toLowerCase()})` }}>
-                      {LANE_LABEL[lane as Lane] ?? lane}: {c}
-                    </span>
-                  ))}
+              <div className="import-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    void save().then((s) => s && onPlay(s.id, 'performance', s.level));
+                  }}
+                >
+                  <Icon name="play" />
+                  Save and play {preview.name}
+                </button>
+                <button type="button" className="btn" onClick={() => void save()} disabled={busy !== null}>
+                  Save
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {error && <p className="notice">{error}</p>}
+
+      {songs.length === 0 && !working ? (
+        <div className="empty">
+          <h2>No songs yet</h2>
+          <p style={{ marginBottom: 18 }}>MP3, M4A, WAV or OGG. Nothing is uploaded.</p>
+          <button type="button" className="btn btn-primary" onClick={() => fileRef.current?.click()}>
+            <Icon name="upload" />
+            Import a song
+          </button>
+        </div>
+      ) : (
+        <ul className="row-list">
+          {songs.map((s) => {
+            const busyHere = recharting === s.id;
+            const hasLevels = s.levels.length > 0;
+            const sel = hasLevels ? (pickLevel(s.levels, picked[s.id] ?? nextSongLevel(progress, s.id, s.levels)) ?? s.levels[0]) : null;
+            const rec = progress.lessons[sel ? levelId(s.id, sel.level) : s.id];
+            const passed = s.levels.filter((l) => (progress.lessons[levelId(s.id, l.level)]?.stars ?? 0) > 0).length;
+            return (
+              <li key={s.id} className="song-row">
+                <div style={{ minWidth: 0 }}>
+                  <div className="song-title">{s.title}</div>
+                  <div className="song-meta">
+                    <span className="mono">{fmtSec(s.durationSec)}</span> · <span className="mono">{s.bpm}</span> bpm
+                    {hasLevels ? (
+                      <>
+                        {' '}
+                        · {passed} of {s.levels.length} levels passed
+                        {rec && rec.plays > 0 && (
+                          <>
+                            {' '}
+                            · best <span className="mono">{Math.round(rec.bestAcc * 100)}%</span>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <span className="warn"> · charted before levels; re-chart to get them</span>
+                    )}
+                  </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  <button type="button" className="btn primary big" onClick={() => void save()} disabled={busy !== null}>
-                    💾 Save
+                {hasLevels && sel ? (
+                  <div className="ladder" role="radiogroup" aria-label={`${s.title} level`}>
+                    {s.levels.map((l) => (
+                      <button
+                        key={l.level}
+                        type="button"
+                        role="radio"
+                        aria-checked={sel.level === l.level}
+                        onClick={() => setPicked((p) => ({ ...p, [s.id]: l.level }))}
+                        title={`${l.name}: ${l.blurb} (${l.notes} notes)`}
+                      >
+                        <span className="step">{l.name}</span>
+                        <Stars count={3} filled={progress.lessons[levelId(s.id, l.level)]?.stars ?? 0} size={10} />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <span />
+                )}
+
+                <div className="song-actions">
+                  <button type="button" className="btn btn-primary" onClick={() => onPlay(s.id, 'performance', sel?.level)} disabled={busyHere}>
+                    <Icon name="play" />
+                    Play
+                  </button>
+                  <button type="button" className="btn" onClick={() => onPlay(s.id, 'practice', sel?.level)} disabled={busyHere} title="Practice: loop sections, slow down">
+                    Practice
                   </button>
                   <button
                     type="button"
-                    className="btn big"
-                    disabled={busy !== null}
-                    onClick={() => {
-                      void save().then((s) => s && onPlay(s.id, 'performance', s.level));
-                    }}
+                    className="btn btn-quiet btn-icon"
+                    onClick={() => void rechart(s.id)}
+                    disabled={recharting !== null}
+                    aria-label={`Re-chart ${s.title}`}
+                    title={busyHere ? 'Re-charting…' : 'Transcribe again with the current drum model'}
                   >
-                    ▶ Save &amp; play {preview.name}
+                    <Icon name="refresh" />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-quiet btn-icon"
+                    aria-label={`Delete ${s.title}`}
+                    title="Delete"
+                    onClick={() => {
+                      void deleteSong(s.id).then(refresh);
+                    }}
+                    disabled={busyHere}
+                  >
+                    <Icon name="trash" />
                   </button>
                 </div>
-              </>
-            )}
-          </div>
-        )}
-        {error && <p className="import-error">{error}</p>}
-        <p className="credit">
-          Drum detection: ADTOF model (Zehren, Alunno &amp; Bientinesi, 2023), CC BY-NC-SA 4.0. Audio never leaves
-          this computer.
-        </p>
-      </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
-      <div className="lesson-list">
-        {songs.map((s) => {
-          const busyHere = recharting === s.id;
-          const hasLevels = s.levels.length > 0;
-          const sel = hasLevels ? (pickLevel(s.levels, picked[s.id] ?? nextSongLevel(progress, s.id, s.levels)) ?? s.levels[0]) : null;
-          const rec = progress.lessons[sel ? levelId(s.id, sel.level) : s.id];
-          const passed = s.levels.filter((l) => (progress.lessons[levelId(s.id, l.level)]?.stars ?? 0) > 0).length;
-          return (
-            <div key={s.id} className="card lesson-card" style={{ cursor: 'default' }}>
-              <div className="top">
-                {hasLevels ? (
-                  <span className="pill">
-                    {passed}/{s.levels.length} levels passed
-                  </span>
-                ) : (
-                  <Stars count={3} filled={rec?.stars ?? 0} />
-                )}
-                <span className="pill">{s.bpm} BPM</span>
-              </div>
-              <h3>{s.title}</h3>
-              <p>
-                {fmtSec(s.durationSec)}
-                {!hasLevels && <span className="old-chart"> · old chart, re-chart it to get levels</span>}
-              </p>
-              {hasLevels && sel && (
-                <>
-                  <div className="level-ladder" role="radiogroup" aria-label={`${s.title} levels`}>
-                    {s.levels.map((l) => {
-                      const stars = progress.lessons[levelId(s.id, l.level)]?.stars ?? 0;
-                      return (
-                        <button
-                          key={l.level}
-                          type="button"
-                          role="radio"
-                          aria-checked={sel.level === l.level}
-                          className={`level-chip${sel.level === l.level ? ' active' : ''}`}
-                          onClick={() => setPicked((p) => ({ ...p, [s.id]: l.level }))}
-                          title={`${l.name}: ${l.blurb} (${l.notes} notes)`}
-                        >
-                          <span className="level-num">{l.level}</span>
-                          <span className="level-name">{l.name}</span>
-                          <Stars count={3} filled={stars} size={11} />
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="level-blurb">
-                    {sel.blurb} · {sel.notes} notes
-                  </p>
-                </>
-              )}
-              <div className="meta" style={{ gap: 8, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn primary"
-                  onClick={() => onPlay(s.id, 'performance', sel?.level)}
-                  disabled={busyHere}
-                >
-                  ▶ Play{sel ? ` ${sel.name}` : ''}
-                </button>
-                <button type="button" className="btn" onClick={() => onPlay(s.id, 'practice', sel?.level)} disabled={busyHere}>
-                  🎯 Practice
-                </button>
-                <button
-                  type="button"
-                  className="btn ghost"
-                  onClick={() => void rechart(s.id)}
-                  disabled={recharting !== null}
-                  title="Transcribe this song again with the current drum model"
-                >
-                  {busyHere ? 'Re-charting…' : '↻ Re-chart'}
-                </button>
-                <button
-                  type="button"
-                  className="btn ghost"
-                  aria-label={`Delete ${s.title}`}
-                  onClick={() => {
-                    void deleteSong(s.id).then(refresh);
-                  }}
-                  disabled={busyHere}
-                >
-                  🗑
-                </button>
-                {rec && rec.plays > 0 && (
-                  <span style={{ color: 'var(--muted)', fontSize: 12.5, fontWeight: 600 }}>
-                    best {(rec.bestAcc * 100).toFixed(0)}%
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        {songs.length === 0 && !working && <p style={{ color: 'var(--muted)' }}>No songs yet. Import one above.</p>}
-      </div>
-    </div>
+      <p className="credit">
+        Drum detection: ADTOF model (Zehren, Alunno & Bientinesi, 2023), CC BY-NC-SA 4.0. Audio never leaves this computer.
+      </p>
+    </>
   );
 }

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameEngine } from '../engine/game';
 import type { GameMode, Hud, RunResult } from '../engine/game';
-import type { Lane, Lesson } from '../engine/types';
+import type { Lesson } from '../engine/types';
 import type { SongChart } from '../engine/transcribe';
 import { sharedAudio } from '../engine/audio';
 import { MidiManager } from '../engine/midi';
-import Pads from './Pads';
+import Icon from './Icon';
 
 interface Props {
   lesson: Lesson | null;
@@ -51,7 +51,6 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
   // songs carry their own beat; the click is opt-in there
   const [metronome, setMetronome] = useState(() => !(!lesson && !!song));
   const [midiStatus, setMidiStatus] = useState('checking MIDI…');
-  const [flash, setFlash] = useState({ key: 0, lane: null as Lane | null });
   const [menuOpen, setMenuOpen] = useState(false);
   const [calMs, setCalMs] = useState<number | null>(() => {
     const v = localStorage.getItem('drumlab:cal-ms');
@@ -70,7 +69,6 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
   useEffect(() => {
     engine.onHud = (h) => setHud(h);
     engine.onResult = (r) => onFinishRef.current(r);
-    engine.onFlash = (lane) => setFlash((f) => ({ key: f.key + 1, lane }));
     if (canvasRef.current) engine.attach(canvasRef.current);
     const savedCal = localStorage.getItem('drumlab:cal-ms');
     engine.setCalibration(savedCal !== null ? Number(savedCal) : null);
@@ -126,197 +124,215 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
   };
 
   const acc = hud ? Math.round(hud.accuracy * 100) : 0;
-  const paused = hud?.paused ?? false;
-  const overlay = menuOpen || paused;
+  const combo = hud?.combo ?? 0;
+  const done = hud && hud.notesTotal > 0 ? hud.notesDone / hud.notesTotal : 0;
+  const midiOk = midiStatus.startsWith('MIDI:');
+  const autoMs = Math.round(sharedAudio.latencySec() * 1000);
+
+  // Esc opens and closes the settings panel
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (menuOpen) resume();
+      else openMenu();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen, openMenu, resume]);
 
   return (
-    <div className="play-view">
-      <div className="hud">
-        <span className="pill" style={{ color: 'var(--text)', fontWeight: 800 }}>
-          {title}
-        </span>
-        <div className="stat">
-          <span className="lbl">Accuracy</span>
-          <span className="val">{acc}%</span>
+    <div className="play">
+      <header className="play-bar">
+        <div className="play-title">
+          <button type="button" className="btn btn-quiet btn-icon" aria-label="Exit" title="Exit" onClick={onQuit}>
+            <Icon name="close" />
+          </button>
+          <div style={{ minWidth: 0 }}>
+            <div className="name">{title}</div>
+            <div className="sub">{midiOk ? midiStatus.replace('MIDI: ', 'Kit connected · ') : 'Keyboard: D F J K L ;'}</div>
+          </div>
         </div>
-        <div className="stat">
-          <span className="lbl">Combo</span>
-          <span className={`val combo-val${(hud?.combo ?? 0) > 0 ? ' pop' : ''}`} key={hud?.combo}>
-            {hud?.combo ?? 0}
+
+        <div className="play-center">
+          <div className="seg" role="group" aria-label="Mode">
+            <button type="button" aria-pressed={mode === 'performance'} onClick={() => changeMode('performance')}>
+              Perform
+            </button>
+            <button type="button" aria-pressed={mode === 'practice'} onClick={() => changeMode('practice')}>
+              Practice
+            </button>
+          </div>
+          <span className="tempo">
+            <b>{hud?.bpm ?? baseBpm}</b> bpm{bpmMul !== 1 ? ` · ${Math.round(bpmMul * 100)}%` : ''}
           </span>
         </div>
-        <div className="stat">
-          <span className="lbl">Score</span>
-          <span className="val">{hud?.score ?? 0}</span>
+
+        <div className="play-stats">
+          <div className="stat">
+            <span className="k">Accuracy</span>
+            <span className="v">{acc}%</span>
+          </div>
+          <div className="stat">
+            <span className="k">Streak</span>
+            <span className={`v${combo >= 10 ? ' hot' : ''}`}>{combo}</span>
+          </div>
+          <div className="stat">
+            <span className="k">Score</span>
+            <span className="v">{(hud?.score ?? 0).toLocaleString()}</span>
+          </div>
+          <button type="button" className="btn btn-icon" aria-label="Settings" title="Settings (Esc)" onClick={menuOpen ? resume : openMenu}>
+            <Icon name={menuOpen ? 'close' : 'sliders'} />
+          </button>
         </div>
-        <div className="stat">
-          <span className="lbl">Tempo</span>
-          <span className="val">{hud?.bpm ?? baseBpm}</span>
-        </div>
-        <div className="stat">
-          <span className="lbl">Mode</span>
-          <span className="val" style={{ fontSize: 15 }}>
-            {mode === 'performance' ? '⭐ Performance' : '🎯 Practice'}
-          </span>
-        </div>
-        <span className="spacer" />
-        <span className={`midi-chip${midiStatus.startsWith('MIDI:') ? ' ok' : ''}`}>{midiStatus}</span>
-        <button type="button" className="btn" onClick={openMenu}>
-          {paused && !menuOpen ? '▸ Resume' : '☰ Menu'}
-        </button>
-        <div className="progress-track">
-          <div
-            className="progress-fill"
-            style={{ width: `${hud && hud.notesTotal > 0 ? (hud.notesDone / hud.notesTotal) * 100 : 0}%` }}
-          />
-        </div>
+      </header>
+
+      <div className="play-progress" aria-hidden="true">
+        <span style={{ width: `${done * 100}%` }} />
       </div>
 
-      <div className="canvas-wrap">
-        <canvas ref={canvasRef} />
-        {overlay && (
-          <div className="overlay">
-            <div className="panel card">
-              <h3>{menuOpen ? 'Menu' : 'Paused'}</h3>
+      <div className="stage">
+        <canvas
+          ref={canvasRef}
+          onPointerDown={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            const lane = engine.laneAt(e.clientY - r.top);
+            if (lane) engine.hit(lane, 1, e.timeStamp);
+          }}
+        />
 
-              {levels && levels.length > 1 && onLevel && (
-                <label className="ctl-row">
-                  Level
-                  <select
-                    className="ctl"
-                    value={level}
-                    onChange={(e) => onLevel(Number(e.target.value), mode)}
-                  >
-                    {levels.map((l) => (
-                      <option key={l.level} value={l.level}>
-                        {l.level}. {l.name} ({l.notes} notes)
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-
-              <div className="mode-switch">
-                <button
-                  type="button"
-                  className={`btn${mode === 'performance' ? ' active' : ''}`}
-                  onClick={() => changeMode('performance')}
-                >
-                  Performance
-                </button>
-                <button
-                  type="button"
-                  className={`btn${mode === 'practice' ? ' active' : ''}`}
-                  onClick={() => changeMode('practice')}
-                >
-                  Practice
-                </button>
+        {menuOpen && (
+          <>
+            <div className="panel-scrim" onClick={resume} />
+            <aside className="panel" aria-label="Settings">
+              <div className="panel-head">
+                <h2>Paused</h2>
+                <span className="faint" style={{ fontSize: 12 }}>
+                  Esc to resume
+                </span>
               </div>
+              <div className="panel-body">
+                {levels && levels.length > 1 && onLevel && (
+                  <div className="panel-group">
+                    <label className="field">
+                      Level
+                      <select className="select" value={level} onChange={(e) => onLevel(Number(e.target.value), mode)}>
+                        {levels.map((l) => (
+                          <option key={l.level} value={l.level}>
+                            {l.level}. {l.name} ({l.notes} notes)
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
 
-              {mode === 'practice' && (
-                <>
-                  <label className="ctl-row">
-                    Section
-                    <select
-                      className="ctl"
-                      value={sectionIdx}
-                      onChange={(e) => {
-                        const i = Number(e.target.value);
-                        setSectionIdx(i);
-                        engine.setSection(i);
-                        restart(mode, i, bpmMul, speed, waitMode);
-                      }}
-                    >
-                      <option value={-1}>Whole song</option>
-                      {sections.map((s, i) => (
-                        <option key={i} value={i}>
-                          {isSong
-                            ? `${s.name} (${fmtSec(s.start)}–${fmtSec(s.end)})`
-                            : `${s.name} (bars ${Math.floor(s.start / 4) + 1}–${Math.ceil(s.end / 4)})`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="ctl-row">
-                    Tempo — {Math.round(baseBpm * bpmMul)} BPM ({Math.round(bpmMul * 100)}%)
-                    {isSong && (
-                      <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
-                        pitch shifts when slowed
+                {mode === 'practice' ? (
+                  <div className="panel-group">
+                    <label className="field">
+                      Section
+                      <select
+                        className="select"
+                        value={sectionIdx}
+                        onChange={(e) => {
+                          const i = Number(e.target.value);
+                          setSectionIdx(i);
+                          engine.setSection(i);
+                          restart(mode, i, bpmMul, speed, waitMode);
+                        }}
+                      >
+                        <option value={-1}>Whole {isSong ? 'song' : 'lesson'}</option>
+                        {sections.map((sec, i) => (
+                          <option key={i} value={i}>
+                            {isSong
+                              ? `${sec.name} (${fmtSec(sec.start)}–${fmtSec(sec.end)})`
+                              : `${sec.name} (bars ${Math.floor(sec.start / 4) + 1}–${Math.ceil(sec.end / 4)})`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>
+                        Tempo{' '}
+                        <span className="field-hint mono">
+                          {Math.round(baseBpm * bpmMul)} bpm · {Math.round(bpmMul * 100)}%
+                        </span>
                       </span>
-                    )}
+                      <input
+                        type="range"
+                        min={50}
+                        max={120}
+                        step={5}
+                        value={Math.round(bpmMul * 100)}
+                        onChange={(e) => {
+                          const bm = Number(e.target.value) / 100;
+                          setBpmMul(bm);
+                          engine.setBpmMul(bm);
+                        }}
+                      />
+                      {isSong && <span className="range-ends">Slowing a song lowers its pitch</span>}
+                    </label>
+                    <label className="check">
+                      Wait for me on a miss
+                      <input
+                        type="checkbox"
+                        checked={waitMode}
+                        onChange={(e) => {
+                          setWaitMode(e.target.checked);
+                          engine.setWaitMode(e.target.checked);
+                        }}
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <p className="faint" style={{ fontSize: 12.5 }}>
+                    Perform plays the full {isSong ? 'song' : 'lesson'} at full tempo and earns stars. Switch to Practice to loop a
+                    section or slow it down.
+                  </p>
+                )}
+
+                <div className="panel-group">
+                  <label className="field">
+                    <span>
+                      Scroll speed <span className="field-hint mono">{Math.round(speed * 100)}%</span>
+                    </span>
                     <input
                       type="range"
-                      min={50}
-                      max={120}
-                      step={5}
-                      value={Math.round(bpmMul * 100)}
+                      min={60}
+                      max={160}
+                      step={10}
+                      value={Math.round(speed * 100)}
                       onChange={(e) => {
-                        const bm = Number(e.target.value) / 100;
-                        setBpmMul(bm);
-                        engine.setBpmMul(bm);
+                        const sp = Number(e.target.value) / 100;
+                        setSpeed(sp);
+                        engine.setSpeed(sp);
                       }}
                     />
-                    <span className="vals">
-                      <span>{Math.round(baseBpm * 0.5)}</span>
-                      <span>{baseBpm}</span>
-                      <span>{Math.round(baseBpm * 1.2)}</span>
-                    </span>
                   </label>
-                  <label className="toggle">
-                    Wait mode — freeze on a miss until you hit it
+                  <label className="check">
+                    Metronome
                     <input
                       type="checkbox"
-                      checked={waitMode}
+                      checked={metronome}
                       onChange={(e) => {
-                        setWaitMode(e.target.checked);
-                        engine.setWaitMode(e.target.checked);
+                        setMetronome(e.target.checked);
+                        engine.setMetronome(e.target.checked);
                       }}
                     />
                   </label>
-                </>
-              )}
+                </div>
 
-              <label className="ctl-row">
-                Note speed — {Math.round(speed * 100)}%
-                <input
-                  type="range"
-                  min={60}
-                  max={160}
-                  step={10}
-                  value={Math.round(speed * 100)}
-                  onChange={(e) => {
-                    const sp = Number(e.target.value) / 100;
-                    setSpeed(sp);
-                    engine.setSpeed(sp);
-                  }}
-                />
-              </label>
-              <label className="toggle">
-                Metronome
-                <input
-                  type="checkbox"
-                  checked={metronome}
-                  onChange={(e) => {
-                    setMetronome(e.target.checked);
-                    engine.setMetronome(e.target.checked);
-                  }}
-                />
-              </label>
-
-              <label className="ctl-row">
-                  Audio sync —{' '}
-                  {calMs === null ? `auto (${Math.round(sharedAudio.latencySec() * 1000)}ms)` : `${calMs}ms`}
-                  <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
-                    How long your speakers or headphones take to play a sound. Hits judged late while you play on the
-                    beat? Raise it. Judged early? Lower it. The results screen can set it from your playing.
-                  </span>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div className="panel-group">
+                  <label className="field">
+                    <span>
+                      Audio delay{' '}
+                      <span className="field-hint mono">{calMs === null ? `auto · ${autoMs} ms` : `${calMs} ms`}</span>
+                    </span>
                     <input
                       type="range"
                       min={-100}
                       max={500}
                       step={5}
-                      value={calMs ?? Math.round(sharedAudio.latencySec() * 1000)}
+                      value={calMs ?? autoMs}
                       onChange={(e) => {
                         const v = Number(e.target.value);
                         setCalMs(v);
@@ -324,39 +340,38 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
                         localStorage.setItem('drumlab:cal-ms', String(v));
                       }}
                     />
+                    <span className="field-hint">
+                      How long your speakers or headphones take to play a sound. Hits judged late while you play on the beat: raise it.
+                    </span>
+                  </label>
+                  {calMs !== null && (
                     <button
                       type="button"
-                      className="btn"
+                      className="btn btn-quiet"
+                      style={{ alignSelf: 'flex-start' }}
                       onClick={() => {
                         setCalMs(null);
                         engine.setCalibration(null);
                         localStorage.removeItem('drumlab:cal-ms');
                       }}
                     >
-                      Auto
+                      Use the device value ({autoMs} ms)
                     </button>
-                  </div>
-                </label>
-
-              <button type="button" className="btn primary big" onClick={resume}>
-                Resume
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => restart(mode, sectionIdx, bpmMul, speed, waitMode)}
-              >
-                ↻ Restart
-              </button>
-              <button type="button" className="btn ghost" onClick={onQuit}>
-                ✕ Quit
-              </button>
-            </div>
-          </div>
+                  )}
+                </div>
+              </div>
+              <div className="panel-foot">
+                <button type="button" className="btn btn-primary" onClick={resume}>
+                  Resume
+                </button>
+                <button type="button" className="btn" onClick={() => restart(mode, sectionIdx, bpmMul, speed, waitMode)}>
+                  Restart
+                </button>
+              </div>
+            </aside>
+          </>
         )}
       </div>
-
-      <Pads onHit={(lane, at) => engine.hit(lane, 1, at)} flashKey={flash.key} flashLane={flash.lane} />
     </div>
   );
 }

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { GameMode, RunResult } from './engine/game';
-import type { PathId } from './engine/types';
-import { lessonById, lessonsInPath } from './content/lessons';
+import { PATHS, lessonById, lessonsInPath } from './content/lessons';
 import { loadProgress, recordResult, saveProgress } from './state/progress';
 import type { Progress } from './state/progress';
 import { decodeAudioBytes, normalizeSettings, parseLevelId, pickLevel, songLevels } from './engine/transcribe';
@@ -10,16 +9,16 @@ import { sharedAudio } from './engine/audio';
 import { getSong } from './engine/songstore';
 import type { SongChart, SongLevel } from './engine/transcribe';
 import Home from './ui/Home';
-import LessonList from './ui/LessonList';
+import Shell from './ui/Shell';
+import type { Section } from './ui/Shell';
 import PlayView from './ui/PlayView';
 import ResultsView from './ui/ResultsView';
 import KitSetup from './ui/KitSetup';
 import SongLibrary from './ui/SongLibrary';
 
 type View =
-  | { name: 'home' }
-  | { name: 'path'; pathId: PathId }
-  | { name: 'play'; lessonId: string }
+  | { name: 'learn' }
+  | { name: 'play'; lessonId: string; mode?: GameMode }
   | { name: 'kit' }
   | { name: 'songs' }
   | { name: 'songplay'; songId: string; mode: GameMode; level?: number }
@@ -27,7 +26,7 @@ type View =
 
 export default function App() {
   const [progress, setProgress] = useState<Progress>(loadProgress);
-  const [view, setView] = useState<View>({ name: 'home' });
+  const [view, setView] = useState<View>({ name: 'learn' });
   const [prevBest, setPrevBest] = useState<number | null>(null);
 
   const handleFinish = useCallback((r: RunResult, title?: string, next?: { level: number; name: string }) => {
@@ -41,39 +40,32 @@ export default function App() {
     setView({ name: 'results', lessonId: r.lessonId, result: r, title, next });
   }, []);
 
-  if (view.name === 'home') {
-    return (
-      <Home
-        progress={progress}
-        onPath={(pathId) => setView({ name: 'path', pathId })}
-        onKit={() => setView({ name: 'kit' })}
-        onSongs={() => setView({ name: 'songs' })}
-      />
-    );
-  }
+  const nav = (s: Section) => setView({ name: s } as View);
 
-  if (view.name === 'path') {
+  if (view.name === 'learn') {
     return (
-      <LessonList
-        pathId={view.pathId}
-        progress={progress}
-        onBack={() => setView({ name: 'home' })}
-        onPlay={(lessonId) => setView({ name: 'play', lessonId })}
-      />
+      <Shell section="learn" progress={progress} onNav={nav}>
+        <Home progress={progress} onPlay={(lessonId) => setView({ name: 'play', lessonId })} />
+      </Shell>
     );
   }
 
   if (view.name === 'kit') {
-    return <KitSetup onBack={() => setView({ name: 'home' })} />;
+    return (
+      <Shell section="kit" progress={progress} onNav={nav}>
+        <KitSetup />
+      </Shell>
+    );
   }
 
   if (view.name === 'songs') {
     return (
-      <SongLibrary
-        progress={progress}
-        onBack={() => setView({ name: 'home' })}
-        onPlay={(songId, mode, level) => setView({ name: 'songplay', songId, mode, level })}
-      />
+      <Shell section="songs" progress={progress} onNav={nav}>
+        <SongLibrary
+          progress={progress}
+          onPlay={(songId, mode, level) => setView({ name: 'songplay', songId, mode, level })}
+        />
+      </Shell>
     );
   }
 
@@ -96,46 +88,56 @@ export default function App() {
   if (view.name === 'play' && lesson) {
     return (
       <PlayView
+        key={`${lesson.id}:${view.mode ?? 'performance'}`}
         lesson={lesson}
         song={null}
+        initialMode={view.mode}
         onFinish={handleFinish}
-        onQuit={() => setView({ name: 'home' })}
+        onQuit={() => setView({ name: 'learn' })}
       />
     );
   }
 
   if (view.name === 'results') {
     const title = view.title ?? lesson?.title ?? 'Song';
+    const isBest = prevBest !== null && view.result.accuracy > prevBest && view.result.mode === 'performance';
     if (lesson) {
       const siblings = lessonsInPath(lesson.pathId);
       const idx = siblings.findIndex((l) => l.id === lesson.id);
       const nextLesson = idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1] : null;
       return (
-        <ResultsView
-          title={title}
-          result={view.result}
-          isBest={prevBest !== null && view.result.accuracy > prevBest && view.result.mode === 'performance'}
-          nextLabel={nextLesson ? `Next: ${nextLesson.title}` : undefined}
-          onRetry={() => setView({ name: 'play', lessonId: lesson.id })}
-          onNext={() => nextLesson && setView({ name: 'play', lessonId: nextLesson.id })}
-          onHome={() => setView({ name: 'home' })}
-        />
+        <Shell section={null} progress={progress} onNav={nav}>
+          <ResultsView
+            title={title}
+            kicker={PATHS.find((p) => p.id === lesson.pathId)?.name ?? 'Lesson'}
+            result={view.result}
+            isBest={isBest}
+            nextLabel={nextLesson ? `Next: ${nextLesson.title}` : undefined}
+            onRetry={() => setView({ name: 'play', lessonId: lesson.id, mode: view.result.mode })}
+            onNext={() => nextLesson && setView({ name: 'play', lessonId: nextLesson.id })}
+            onHome={() => setView({ name: 'learn' })}
+            homeLabel="Back to lessons"
+          />
+        </Shell>
       );
     }
     // song results: retry this level, or step up to the next one
     const { songId, level } = parseLevelId(view.lessonId);
     const next = view.next;
     return (
-      <ResultsView
-        title={title}
-        result={view.result}
-        isBest={prevBest !== null && view.result.accuracy > prevBest && view.result.mode === 'performance'}
-        nextLabel={next ? `Next level: ${next.name}` : undefined}
-        onRetry={() => setView({ name: 'songplay', songId, mode: view.result.mode, level: level ?? undefined })}
-        onNext={() => next && setView({ name: 'songplay', songId, mode: 'performance', level: next.level })}
-        onHome={() => setView({ name: 'songs' })}
-        homeLabel="My songs"
-      />
+      <Shell section={null} progress={progress} onNav={nav}>
+        <ResultsView
+          title={title}
+          kicker="Song"
+          result={view.result}
+          isBest={isBest}
+          nextLabel={next ? `Next level: ${next.name}` : undefined}
+          onRetry={() => setView({ name: 'songplay', songId, mode: view.result.mode, level: level ?? undefined })}
+          onNext={() => next && setView({ name: 'songplay', songId, mode: 'performance', level: next.level })}
+          onHome={() => setView({ name: 'songs' })}
+          homeLabel="Back to songs"
+        />
+      </Shell>
     );
   }
 
@@ -190,10 +192,10 @@ function SongPlay({
 
   if (err) {
     return (
-      <div className="app">
-        <div className="card" style={{ marginTop: 40, textAlign: 'center' }}>
-          <p style={{ color: 'var(--red)' }}>{err}</p>
-          <button type="button" className="btn primary" onClick={onQuit}>
+      <div className="loading">
+        <div style={{ textAlign: 'center' }}>
+          <p style={{ color: 'var(--bad)', marginBottom: 14 }}>{err}</p>
+          <button type="button" className="btn" onClick={onQuit}>
             Back to songs
           </button>
         </div>
@@ -201,11 +203,7 @@ function SongPlay({
     );
   }
   if (!loaded) {
-    return (
-      <div className="app">
-        <p style={{ color: 'var(--muted)', marginTop: 40 }}>Loading song…</p>
-      </div>
-    );
+    return <div className="loading">Loading song…</div>;
   }
   // songs charted before levels existed play their single saved chart
   const current = pickLevel(loaded.levels, level ?? loaded.defaultLevel);

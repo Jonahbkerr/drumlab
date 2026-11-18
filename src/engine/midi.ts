@@ -11,7 +11,7 @@ export const KEY_TO_LANE: Record<string, Lane> = {
 };
 
 /** General MIDI percussion map — the fallback when no custom map entry exists. */
-const GM_TO_LANE: Record<number, Lane> = {
+export const GM_TO_LANE: Record<number, Lane> = {
   35: 'kick',
   36: 'kick',
   37: 'snare',

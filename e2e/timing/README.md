@@ -15,11 +15,20 @@ gstack `browse`. Run from the repo root with the dev server on :5173.
 - `robot-lesson.js` listens to the lesson's metronome with the ear and hits
   every note on the beat grid those clicks define, at the moment it is heard.
 
+- `fake-midi.js` replaces Web MIDI with a fake USB kit; `window.__midiHit(38)`
+  sends a hit (used to test pad assignment on the Kit page).
+
 ```bash
 e2e/timing/lesson-test.sh 12                 # Backbeat Basics, 12 s
+e2e/timing/song-test.sh "Full kit" 0 26      # first song in the list
 e2e/timing/play-song.sh one-step-closer "Full kit"
 # then: browse eval e2e/timing/robot.js; browse js "window.__robot.run(10)"
 ```
+
+Note: the judged mean depends on the audio device's clock step. With
+128-frame callbacks (2.7 ms) runs land around +1 ms; with 256-frame
+callbacks (5.3 ms) around -4 ms, because the clock reads up to one step
+behind. Both are far inside the 40 ms Perfect window.
 
 Results on 2026-11-18 (reported output latency 173 ms in the test browser):
 lessons 47/47 perfect, mean +1.3 ms; songs 93/93 perfect, mean +1.5 ms;

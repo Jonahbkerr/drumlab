@@ -1,6 +1,6 @@
 import type { RunResult } from '../engine/game';
-import { LANE_COLOR } from '../engine/game';
 import { LANES, LANE_LABEL } from '../engine/types';
+import Stars from './Stars';
 import { starsForAccuracy } from '../engine/judge';
 import { sharedAudio } from '../engine/audio';
 import { useState } from 'react';
@@ -20,6 +20,8 @@ function currentCalMs(): number {
 
 interface Props {
   title: string;
+  /** small line above the title: path name or "Song" */
+  kicker: string;
   result: RunResult;
   isBest: boolean;
   nextLabel?: string;
@@ -29,16 +31,7 @@ interface Props {
   homeLabel?: string;
 }
 
-export default function ResultsView({
-  title,
-  result,
-  isBest,
-  nextLabel,
-  onRetry,
-  onNext,
-  onHome,
-  homeLabel = 'Home',
-}: Props) {
+export default function ResultsView({ title, kicker, result, isBest, nextLabel, onRetry, onNext, onHome, homeLabel = 'Back' }: Props) {
   const stars = result.completed ? starsForAccuracy(result.accuracy) : 0;
   const earlyAvg = result.earlyCount > 0 ? result.earlySumMs / result.earlyCount : 0;
   const lateAvg = result.lateCount > 0 ? result.lateSumMs / result.lateCount : 0;
@@ -57,104 +50,136 @@ export default function ResultsView({
     }
     setApplied(next);
   };
+  const acc = Math.round(result.accuracy * 100);
+  const nextFirst = result.completed && nextLabel && onNext;
 
   return (
     <div className="results">
-      <span className="tag">{result.mode === 'performance' ? 'Performance' : 'Practice'}</span>
-      <h1 style={{ fontSize: 34, marginTop: 8 }}>{title}</h1>
-      {isBest && (
-        <p style={{ color: 'var(--amber)', fontWeight: 700, margin: '8px 0 0' }}>
-          ★ New best accuracy!
-        </p>
-      )}
-
-      <div className="big-stars">
-        {[0, 1, 2].map((i) => (
-          <svg key={i} viewBox="0 0 24 24">
-            <path
-              d="M12 2l2.9 6.2 6.8.9-5 4.7 1.3 6.7-6-3.3-6 3.3 1.3-6.7-5-4.7 6.8-.9z"
-              fill={i < stars ? '#ffc53d' : 'rgba(255,255,255,0.12)'}
-            />
-          </svg>
-        ))}
+      <div className="result-hero">
+        <div className="kicker">
+          {kicker} · {result.mode === 'performance' ? 'Perform' : 'Practice'}
+        </div>
+        <h1>{title}</h1>
+        <div className="result-acc">
+          {acc}
+          <small>%</small>
+        </div>
+        <Stars count={3} filled={stars} size={22} />
+        {isBest && <p className="result-best">New best accuracy</p>}
+        {!result.completed && result.mode === 'performance' && (
+          <p className="faint" style={{ marginTop: 10, fontSize: 13 }}>
+            60% earns the first star.
+          </p>
+        )}
+        <div className="result-actions">
+          {nextFirst ? (
+            <>
+              <button type="button" className="btn btn-primary btn-lg" onClick={onNext}>
+                {nextLabel}
+              </button>
+              <button type="button" className="btn btn-lg" onClick={onRetry}>
+                Play again
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="btn btn-primary btn-lg" onClick={onRetry}>
+                Play again
+              </button>
+              {nextLabel && onNext && (
+                <button type="button" className="btn btn-lg" onClick={onNext}>
+                  {nextLabel}
+                </button>
+              )}
+            </>
+          )}
+          <button type="button" className="btn btn-quiet" onClick={onHome}>
+            {homeLabel}
+          </button>
+        </div>
       </div>
 
-      <div className="result-grid">
-        <div className="cell">
-          <div className="big">{Math.round(result.accuracy * 100)}%</div>
-          <div className="lbl">Accuracy</div>
+      <div>
+        <div className="result-table">
+          <div>
+            <div className="label">Notes hit</div>
+            <div className="v">
+              {result.hits}
+              <span className="faint">/{result.total}</span>
+            </div>
+          </div>
+          <div>
+            <div className="label">Perfect</div>
+            <div className="v">{result.perfects}</div>
+          </div>
+          <div>
+            <div className="label">Best streak</div>
+            <div className="v">{result.maxCombo}</div>
+          </div>
+          <div>
+            <div className="label">Score</div>
+            <div className="v">{result.score.toLocaleString()}</div>
+          </div>
         </div>
-        <div className="cell">
-          <div className="big">{result.score.toLocaleString()}</div>
-          <div className="lbl">Score</div>
-        </div>
-        <div className="cell">
-          <div className="big">{result.maxCombo}</div>
-          <div className="lbl">Max combo</div>
-        </div>
-        <div className="cell">
-          <div className="big">{result.hits}</div>
-          <div className="lbl">/{result.total} notes</div>
-        </div>
-      </div>
 
-      <div className="lane-bars">
+        <h2 className="result-sub">By drum</h2>
         {LANES.map((lane) => {
           const s = result.perLane[lane];
           const total = s.hit + s.miss;
           if (total === 0) return null;
           const pct = (s.hit / total) * 100;
           return (
-            <div className="lane-bar" key={lane}>
-              <span className="name">{LANE_LABEL[lane]}</span>
-              <div className="track">
-                <div className="fill" style={{ width: `${pct}%`, background: LANE_COLOR[lane] }} />
-              </div>
-              <span className="pct">{Math.round(pct)}%</span>
+            <div className="lane-acc" key={lane}>
+              <span>{LANE_LABEL[lane]}</span>
+              <span className="track">
+                <span style={{ width: `${pct}%`, background: `var(--${lane.toLowerCase()})` }} />
+              </span>
+              <span className="pct">
+                {s.hit}/{total}
+              </span>
             </div>
           );
         })}
-      </div>
 
-      <p className="timing-note">
-        <b>{result.earlyCount}</b> early (avg <b>{earlyAvg.toFixed(0)}ms</b>) ·{' '}
-        <b>{result.lateCount}</b> late (avg <b>{lateAvg.toFixed(0)}ms</b>) ·{' '}
-        <b>{result.perfects}</b> perfect · <b>{result.misses}</b> missed
-      </p>
-
-      {offerShift && (
-        <div className="timing-fix">
-          {applied === null ? (
-            <>
-              <span>
-                You hit <b>{Math.round(Math.abs(lean))} ms {lean > 0 ? 'late' : 'early'}</b> on average. If you were
-                playing along to what you heard, your audio has extra delay.
-              </span>
-              <button type="button" className="btn" onClick={applyShift}>
-                Shift timing {lean > 0 ? '+' : '−'}
-                {Math.round(Math.abs(lean))} ms
-              </button>
-            </>
-          ) : (
-            <span>
-              Timing set to <b>{applied} ms</b>. Play again to feel it (change it any time in ☰ Menu → Audio sync).
-            </span>
-          )}
+        <h2 className="result-sub">Timing</h2>
+        <div className="timing">
+          <div>
+            <div className="label">Early</div>
+            <div className="v">
+              {result.earlyCount} <span className="faint" style={{ fontSize: 13 }}>avg {earlyAvg.toFixed(0)} ms</span>
+            </div>
+          </div>
+          <div>
+            <div className="label">Late</div>
+            <div className="v">
+              {result.lateCount} <span className="faint" style={{ fontSize: 13 }}>avg {lateAvg.toFixed(0)} ms</span>
+            </div>
+          </div>
+          <div>
+            <div className="label">Missed</div>
+            <div className="v">{result.misses}</div>
+          </div>
         </div>
-      )}
-
-      <div className="result-actions">
-        <button type="button" className="btn primary big" onClick={onRetry}>
-          ↻ Play again
-        </button>
-        {nextLabel && onNext && (
-          <button type="button" className="btn big" onClick={onNext}>
-            {nextLabel} →
-          </button>
+        {offerShift && (
+          <div className="timing-fix">
+            {applied === null ? (
+              <>
+                <span>
+                  You played <b>{Math.round(Math.abs(lean))} ms {lean > 0 ? 'late' : 'early'}</b> on average. If you were playing along
+                  to what you heard, your audio has extra delay.
+                </span>
+                <button type="button" className="btn" onClick={applyShift}>
+                  Shift timing {lean > 0 ? '+' : '−'}
+                  {Math.round(Math.abs(lean))} ms
+                </button>
+              </>
+            ) : (
+              <span>
+                Timing set to <b className="mono">{applied} ms</b>. Play again to feel it, or adjust it in the play menu under Audio delay.
+              </span>
+            )}
+          </div>
         )}
-        <button type="button" className="btn ghost big" onClick={onHome}>
-          {homeLabel}
-        </button>
       </div>
     </div>
   );

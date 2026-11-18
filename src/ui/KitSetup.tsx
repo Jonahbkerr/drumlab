@@ -1,192 +1,214 @@
 import { useEffect, useRef, useState } from 'react';
-import { MidiManager } from '../engine/midi';
+import { GM_TO_LANE, KEY_TO_LANE, MidiManager } from '../engine/midi';
 import type { MidiDevice, MidiEvent } from '../engine/midi';
-import { LANES, LANE_LABEL } from '../engine/types';
+import { LANE_LABEL } from '../engine/types';
 import type { Lane } from '../engine/types';
-import { LANE_COLOR } from '../engine/game';
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const noteName = (n: number) => `${NOTE_NAMES[n % 12]}${Math.floor(n / 12) - 1}`;
 
-const STATUS_LABEL: Record<string, string> = {
-  'no-midi': 'This browser has no Web MIDI. Open the game in Chrome or Edge — the embedded preview pane may block it.',
-  'midi-denied': 'MIDI access was blocked. Click "Grant MIDI access" and allow it.',
-  'midi:none': 'MIDI ready, but no devices found. Plug in your kit over USB, then reload this page.',
+/** cymbals on top, kick at the bottom, like the play screen and drum notation */
+const ROWS: Lane[] = ['crash', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'];
+
+const KEY_FOR: Partial<Record<Lane, string>> = Object.fromEntries(
+  Object.entries(KEY_TO_LANE).map(([code, lane]) => [lane, code === 'Semicolon' ? ';' : code.replace('Key', '')]),
+);
+
+const STATUS: Record<string, { text: string; tone: 'ok' | 'bad' | 'idle' }> = {
+  'no-midi': { text: 'This browser has no Web MIDI. Open DrumLab in Chrome or Edge.', tone: 'bad' },
+  'midi-denied': { text: 'MIDI access is blocked. Allow it to use your kit.', tone: 'bad' },
+  'midi:none': { text: 'MIDI is on, but no kit is connected. Plug it in over USB.', tone: 'idle' },
+  'checking…': { text: 'Checking for MIDI devices…', tone: 'idle' },
 };
 
-interface Props {
-  onBack: () => void;
-}
+const gmNotesFor = (lane: Lane) =>
+  Object.entries(GM_TO_LANE)
+    .filter(([, l]) => l === lane)
+    .map(([n]) => Number(n));
 
-export default function KitSetup({ onBack }: Props) {
+export default function KitSetup() {
   const [status, setStatus] = useState('checking…');
   const [devices, setDevices] = useState<MidiDevice[]>([]);
   const [events, setEvents] = useState<MidiEvent[]>([]);
   const [map, setMap] = useState<Record<number, Lane>>({});
   const [learning, setLearning] = useState<Lane | null>(null);
   const [busy, setBusy] = useState(false);
+  // the MIDI handler is created once; it must read the CURRENT learn target
+  const learningRef = useRef<Lane | null>(null);
+  const learn = (lane: Lane | null) => {
+    learningRef.current = lane;
+    setLearning(lane);
+  };
 
   const mmRef = useRef<MidiManager | null>(null);
-  if (!mmRef.current) {
-    mmRef.current = new MidiManager(
+  useEffect(() => {
+    let cancelled = false;
+    const m: MidiManager = new MidiManager(
       () => {},
       (ev) => {
-        setEvents((e) => [ev, ...e].slice(0, 10));
-        const mm = mmRef.current!;
-        if (learning) {
-          mm.assign(ev.note, learning);
-          setMap(mm.customMap);
+        setEvents((e) => [ev, ...e].slice(0, 8));
+        const target = learningRef.current;
+        if (target) {
+          // one pad per lane: drop the lane's previous pad first
+          for (const [n, l] of Object.entries(m.customMap)) if (l === target) m.unassign(Number(n));
+          m.assign(ev.note, target);
+          setMap(m.customMap);
+          learningRef.current = null;
           setLearning(null);
         }
       },
       (devs) => setDevices(devs),
     );
-  }
-  const mm = mmRef.current;
-
-  useEffect(() => {
-    let cancelled = false;
-    void mm.init().then((s) => {
+    mmRef.current = m;
+    void m.init().then((s) => {
       if (!cancelled) {
         setStatus(s);
-        setMap(mm.customMap);
+        setMap(m.customMap);
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [mm]);
+  }, []);
 
   const requestAccess = async () => {
+    const mm = mmRef.current;
+    if (!mm) return;
     setBusy(true);
-    const s = await mm.init();
-    setStatus(s);
+    setStatus(await mm.init());
     setMap(mm.customMap);
     setBusy(false);
   };
 
-  const noteForLane = (lane: Lane): number | undefined => {
-    const entries = Object.entries(map);
-    const hit = entries.find(([, l]) => l === lane);
+  const padFor = (lane: Lane): number | undefined => {
+    const hit = Object.entries(map).find(([, l]) => l === lane);
     return hit ? Number(hit[0]) : undefined;
   };
 
+  const connected = devices.length > 0;
+  const st = connected
+    ? { text: `${devices.length === 1 ? devices[0].name : `${devices.length} devices`} connected`, tone: 'ok' as const }
+    : (STATUS[status] ?? { text: status, tone: 'idle' as const });
+
   return (
-    <div className="app">
-      <div className="view-head">
-        <button type="button" className="back-link" onClick={onBack}>
-          ← Back
-        </button>
+    <>
+      <div className="page-head">
         <div>
-          <h2 style={{ fontSize: 26 }}>🥁 Kit setup</h2>
-          <p style={{ color: 'var(--muted)', fontSize: 14, margin: '4px 0 0' }}>
-            Connect your kit to the lanes — hit each pad to learn it.
-          </p>
+          <h1>Kit</h1>
+          <p>Connect an electronic kit over USB and choose which pad plays each lane. Unassigned pads use the General MIDI drum map.</p>
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <div className="tag">MIDI status</div>
-            <p style={{ margin: '6px 0 0', color: 'var(--text)', fontSize: 14.5, fontWeight: 600 }}>
-              {STATUS_LABEL[status] ?? `${devices.length} device(s) connected`}
-            </p>
-            {devices.length > 0 && (
-              <p style={{ margin: '6px 0 0', color: 'var(--muted)', fontSize: 13 }}>
-                {devices.map((d) => d.name).join(' · ')}
-              </p>
-            )}
+      <div className="surface status">
+        <div>
+          <div className="status-text">
+            <span className={`status-dot ${st.tone === 'ok' ? 'ok' : st.tone === 'bad' ? 'bad' : ''}`} />
+            <span>{st.text}</span>
           </div>
-          <button type="button" className="btn primary" onClick={requestAccess} disabled={busy}>
-            {busy ? 'Requesting…' : 'Grant MIDI access'}
+          {devices.length > 1 && <div className="status-devices">{devices.map((d) => d.name).join(' · ')}</div>}
+        </div>
+        {!connected && (
+          <button type="button" className="btn" onClick={requestAccess} disabled={busy}>
+            {busy ? 'Requesting…' : 'Allow MIDI'}
           </button>
-        </div>
-      </div>
-
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="tag">Live monitor</div>
-        <p style={{ color: 'var(--muted)', fontSize: 13.5, margin: '6px 0 10px' }}>
-          Hit any pad — the note number your kit sends appears here.
-        </p>
-        {events.length === 0 ? (
-          <p style={{ color: 'var(--muted)', fontSize: 13.5, margin: 0 }}>No hits seen yet.</p>
-        ) : (
-          <div className="event-list">
-            {events.map((ev, i) => (
-              <div key={i} className="event-row">
-                <span className="kbd">{noteName(ev.note)}</span>
-                <span className="kbd">#{ev.note}</span>
-                <span
-                  className="lane-chip"
-                  style={{
-                    borderColor: ev.lane ? LANE_COLOR[ev.lane] : 'var(--border)',
-                    color: ev.lane ? LANE_COLOR[ev.lane] : 'var(--muted)',
-                  }}
-                >
-                  {ev.lane ? LANE_LABEL[ev.lane] : 'unmapped'}
-                </span>
-                <span style={{ color: 'var(--muted)', fontSize: 12.5 }}>{ev.device}</span>
-              </div>
-            ))}
-          </div>
         )}
       </div>
 
-      <div className="card">
-        <div className="tag">Connect the dots — pad → lane</div>
-        <p style={{ color: 'var(--muted)', fontSize: 13.5, margin: '6px 0 14px' }}>
-          Click a lane&apos;s Learn button, then hit the pad you want on that lane. Unmapped pads
-          fall back to the standard General MIDI drum map.
-        </p>
-        <div className="lane-map">
-          {LANES.map((lane) => {
-            const note = noteForLane(lane);
+      <div className="kit-grid">
+        <section aria-labelledby="map-title">
+          <h2 className="section-title" id="map-title">
+            Pads
+          </h2>
+          <p className="section-sub">Press Assign, then hit the pad you want for that lane.</p>
+          {ROWS.map((lane) => {
+            const pad = padFor(lane);
+            const isLearning = learning === lane;
             return (
-              <div key={lane} className="lane-map-row">
-                <span
-                  className="lane-dot"
-                  style={{ background: LANE_COLOR[lane], boxShadow: `0 0 12px ${LANE_COLOR[lane]}66` }}
-                />
-                <span style={{ fontWeight: 700, width: 110 }}>{LANE_LABEL[lane]}</span>
-                <span className="pill" style={{ minWidth: 110, justifyContent: 'center' }}>
-                  {note !== undefined ? `${noteName(note)} (#${note})` : 'GM default'}
+              <div key={lane} className={`map-row${isLearning ? ' learning' : ''}`}>
+                <span className="swatch" style={{ background: `var(--${lane.toLowerCase()})` }} />
+                <span>
+                  <div className="map-name">{LANE_LABEL[lane]}</div>
+                  <div className="map-key">
+                    Key <span className="kbd">{KEY_FOR[lane]}</span>
+                  </div>
                 </span>
-                <button
-                  type="button"
-                  className={`btn${learning === lane ? ' active learn' : ''}`}
-                  onClick={() => setLearning(learning === lane ? null : lane)}
-                >
-                  {learning === lane ? 'Listening… hit a pad' : 'Learn'}
-                </button>
-                {note !== undefined && (
-                  <button
-                    type="button"
-                    className="btn ghost"
-                    onClick={() => {
-                      mm.unassign(note);
-                      setMap(mm.customMap);
-                    }}
-                  >
-                    Clear
+                <span className={`map-note${pad === undefined ? ' default' : ''}`}>
+                  {isLearning
+                    ? 'Hit a pad…'
+                    : pad !== undefined
+                      ? `${noteName(pad)} · ${pad}`
+                      : `GM ${gmNotesFor(lane).slice(0, 3).join(', ')}`}
+                </span>
+                <span className="map-actions">
+                  <button type="button" className={`btn${isLearning ? ' btn-primary' : ''}`} onClick={() => learn(isLearning ? null : lane)}>
+                    {isLearning ? 'Cancel' : 'Assign'}
                   </button>
-                )}
+                  {pad !== undefined && !isLearning && (
+                    <button
+                      type="button"
+                      className="btn btn-quiet"
+                      onClick={() => {
+                        const mm = mmRef.current;
+                        mm?.unassign(pad);
+                        if (mm) setMap(mm.customMap);
+                      }}
+                    >
+                      Reset
+                    </button>
+                  )}
+                </span>
               </div>
             );
           })}
-        </div>
-        <button
-          type="button"
-          className="btn ghost"
-          style={{ marginTop: 14 }}
-          onClick={() => {
-            mm.resetMap();
-            setMap(mm.customMap);
-          }}
-        >
-          Reset all to GM defaults
-        </button>
+          {Object.keys(map).length > 0 && (
+            <button
+              type="button"
+              className="btn btn-quiet"
+              style={{ marginTop: 12 }}
+              onClick={() => {
+                const mm = mmRef.current;
+                mm?.resetMap();
+                if (mm) setMap(mm.customMap);
+              }}
+            >
+              Reset all pads to General MIDI
+            </button>
+          )}
+        </section>
+
+        <aside className="surface monitor" aria-labelledby="monitor-title">
+          <h2 className="section-title" id="monitor-title">
+            Live input
+          </h2>
+          <p className="section-sub" style={{ marginBottom: 0 }}>
+            Every pad you hit shows here with its MIDI note.
+          </p>
+          {events.length === 0 ? (
+            <p className="faint" style={{ marginTop: 14, fontSize: 12.5 }}>
+              Nothing yet. Hit a pad.
+            </p>
+          ) : (
+            <ul className="monitor-list">
+              {events.map((ev, i) => (
+                <li key={i}>
+                  <span className="mono">{noteName(ev.note)}</span>
+                  <span className="mono faint">{ev.note}</span>
+                  <span className="lane">
+                    {ev.lane ? (
+                      <>
+                        <span className="swatch" style={{ background: `var(--${ev.lane.toLowerCase()})` }} />
+                        {LANE_LABEL[ev.lane]}
+                      </>
+                    ) : (
+                      <span className="faint">Not mapped</span>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </aside>
       </div>
-    </div>
+    </>
   );
 }

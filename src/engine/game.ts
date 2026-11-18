@@ -1,6 +1,7 @@
 import { sharedAudio } from './audio';
 import type { Lane, Lesson, Note, Section } from './types';
 import { LANES, LANE_LABEL } from './types';
+import { KEY_TO_LANE } from './midi';
 import { GOOD_MS, JUDGE_SCORE, judgeDelta, starsForAccuracy } from './judge';
 import type { Judgement } from './judge';
 import type { SongChart } from './transcribe';
@@ -52,13 +53,52 @@ export interface RunResult {
 }
 
 const LANE_COLOR: Record<Lane, string> = {
-  kick: '#ff6a3d',
-  snare: '#ffc53d',
-  hh: '#4cc9f0',
-  tomLo: '#a78bfa',
-  tomHi: '#f472b6',
-  crash: '#34d399',
+  kick: '#f0703f',
+  snare: '#e9b949',
+  hh: '#56bee3',
+  tomLo: '#a08ceb',
+  tomHi: '#e77bb0',
+  crash: '#4cc08e',
 };
+
+/** play-screen rows, top to bottom: cymbals above, kick below, like drum notation */
+const ROW_ORDER: Lane[] = ['crash', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'];
+
+/** only the lanes a lesson or song uses get a row */
+function rowsFor(notes: { lane: Lane }[]): Lane[] {
+  const used = new Set(notes.map((n) => n.lane));
+  const rows = ROW_ORDER.filter((l) => used.has(l));
+  return rows.length > 0 ? rows : ROW_ORDER;
+}
+
+const INK = {
+  header: '#141619',
+  line: '#24272c',
+  line2: '#30343a',
+  text: '#edeef0',
+  text2: '#a6abb3',
+  text3: '#6c717a',
+  accent: '#f06a37',
+  bad: '#e5534b',
+};
+/** keyboard key per lane, shown under each row label */
+const KEY_HINT = Object.fromEntries(
+  Object.entries(KEY_TO_LANE).map(([code, lane]) => [lane, code === 'Semicolon' ? ';' : code.replace('Key', '')]),
+) as Record<Lane, string>;
+
+const FONT = "'Geist Variable', 'Helvetica Neue', Arial, sans-serif";
+const MONO = "'Geist Mono Variable', ui-monospace, Menlo, monospace";
+
+/** row geometry of the last frame (also used to map clicks to lanes) */
+interface Geo {
+  headerW: number;
+  hitX: number;
+  top: number;
+  rowH: number;
+  rows: Lane[];
+  w: number;
+  h: number;
+}
 
 function hexA(hex: string, alpha: number): string {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -85,16 +125,16 @@ interface HitEffect {
 }
 
 const JUDGE_COLOR: Record<Judgement, string> = {
-  perfect: '#ffd166',
-  great: '#4cc9f0',
-  good: '#34d399',
-  miss: '#f87171',
+  perfect: '#f2cd61',
+  great: '#56bee3',
+  good: '#4cc08e',
+  miss: '#e5534b',
 };
+const JUDGE_TEXT: Record<Judgement, string> = { perfect: 'Perfect', great: 'Great', good: 'Good', miss: 'Miss' };
 const EFFECT_LIFE = 0.55;
 
-const HIT_LINE_OFFSET = 148; // px from bottom of canvas
-const PX_PER_BEAT = 170;
-const PX_PER_SEC = 190;
+const PX_PER_BEAT = 200;
+const PX_PER_SEC = 260;
 
 interface Anchor {
   beat: number; // note-space position (lesson beats or song seconds)
@@ -162,6 +202,9 @@ export class GameEngine {
 
   private floats: FloatText[] = [];
   private effects: HitEffect[] = [];
+  /** lanes shown, top to bottom (only lanes the lesson or song uses) */
+  private rows: Lane[] = ROW_ORDER;
+  private geo: Geo | null = null;
   private effectSeed = 1;
   /** last combo milestone shown (every 10) */
   private comboShown = 0;
@@ -371,6 +414,7 @@ export class GameEngine {
       ? lesson.notes.filter((nn) => nn.t >= this.section!.start && nn.t < this.section!.end)
       : [...lesson.notes];
     this.notes.sort((a, b) => a.t - b.t);
+    this.rows = rowsFor(lesson.notes);
     this.resetRun();
   }
 
@@ -397,6 +441,7 @@ export class GameEngine {
       ? chart.notes.filter((nn) => nn.t >= this.section!.start && nn.t < this.section!.end)
       : [...chart.notes];
     this.notes.sort((a, b) => a.t - b.t);
+    this.rows = rowsFor(chart.notes);
     this.resetRun();
   }
 
@@ -614,7 +659,7 @@ export class GameEngine {
     this.effects.push({ lane, at: shownAt, judge: j, delta, seed: this.effectSeed++ });
     if (this.combo >= 10 && this.combo % 10 === 0 && this.combo !== this.comboShown) {
       this.comboShown = this.combo;
-      this.floats.push({ text: `${this.combo} COMBO`, color: '#ffd166', x: 0.5, at: shownAt });
+      this.floats.push({ text: `${this.combo} in a row`, color: INK.accent, x: 0.5, at: shownAt });
     }
     this.pushHud(false);
   }
@@ -724,7 +769,6 @@ export class GameEngine {
             this.freezeClock();
             this.waitIdx = i;
             this.player?.pause();
-            this.floats.push({ text: 'WAIT…', color: '#f87171', x: 0.5, at: now });
             this.pushHud(true);
             break;
           }
@@ -801,6 +845,14 @@ export class GameEngine {
 
   // ---------------------------------------------------------------- render
 
+  /** lane under a point on the canvas (CSS px), for clicking/tapping a row */
+  laneAt(y: number): Lane | null {
+    const g = this.geo;
+    if (!g || y < g.top) return null;
+    const i = Math.floor((y - g.top) / g.rowH);
+    return g.rows[i] ?? null;
+  }
+
   private draw(now: number) {
     const canvas = this.canvas;
     const ctx = this.ctx;
@@ -816,130 +868,145 @@ export class GameEngine {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    const laneW = w / LANES.length;
-    const hitY = h - HIT_LINE_OFFSET;
+    const rows = this.rows;
+    const headerW = Math.round(Math.min(136, Math.max(96, w * 0.11)));
+    const hitX = headerW + Math.round(Math.max(44, w * 0.055));
+    const top = 26;
+    const bottom = 10;
+    const rowH = (h - top - bottom) / rows.length;
+    const geo: Geo = { headerW, hitX, top, rowH, rows, w, h };
+    this.geo = geo;
+    const rowY = (i: number) => top + rowH * (i + 0.5);
+    const noteH = Math.min(46, Math.max(14, rowH * 0.46));
+    const noteW = 18;
     const pxPerSec = this.songMode
       ? PX_PER_SEC * this.speed
-      : (PX_PER_BEAT * (this.lesson!.bpm * this.bpmMul)) / 60 * this.speed;
+      : ((PX_PER_BEAT * (this.lesson!.bpm * this.bpmMul)) / 60) * this.speed;
+    const xAt = (t: number) => hitX + (t - now) * pxPerSec;
 
-    // lanes
-    for (let i = 0; i < LANES.length; i++) {
-      const x = i * laneW;
-      ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.028)' : 'rgba(255,255,255,0.012)';
-      ctx.fillRect(x, 0, laneW, h);
-      ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, h);
-      ctx.stroke();
+    // rows
+    for (let i = 0; i < rows.length; i++) {
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.018)' : 'rgba(255,255,255,0.008)';
+      ctx.fillRect(headerW, top + i * rowH, w - headerW, rowH);
     }
+    ctx.fillStyle = INK.line;
+    for (let i = 0; i <= rows.length; i++) ctx.fillRect(headerW, Math.round(top + i * rowH), w - headerW, 1);
 
-    // beat grid from the song's tracked beats: bar lines brighter
+    // beat grid with bar numbers (tracked beats for songs, the lesson's own beats)
+    ctx.font = `500 11px ${MONO}`;
+    ctx.textAlign = 'left';
+    const gridLine = (x: number, bar: number | null) => {
+      if (x < headerW || x > w) return;
+      ctx.fillStyle = bar !== null ? 'rgba(255,255,255,0.11)' : 'rgba(255,255,255,0.04)';
+      ctx.fillRect(Math.round(x), top, 1, h - top - bottom);
+      if (bar !== null && bar >= 1) {
+        ctx.fillStyle = INK.text3;
+        ctx.fillText(String(bar), Math.round(x) + 4, 17);
+      }
+    };
     if (this.beatSync) {
       const beats = this.chart!.beats!;
       const down = this.chart!.downbeat ?? 0;
       for (let i = 0; i < beats.length; i++) {
-        const t = this.anchor.time + (beats[i] - this.anchor.beat) * this.spb;
-        const y = hitY - (t - now) * pxPerSec;
-        if (y > hitY) continue;
-        if (y < -4) break;
-        const bar = (((i - down) % 4) + 4) % 4 === 0;
-        ctx.fillStyle = bar ? 'rgba(255,255,255,0.17)' : 'rgba(255,255,255,0.06)';
-        ctx.fillRect(0, y - (bar ? 1 : 0.5), w, bar ? 2 : 1);
+        const x = xAt(this.anchor.time + (beats[i] - this.anchor.beat) * this.spb);
+        if (x < headerW) continue;
+        if (x > w) break;
+        const k = i - down;
+        gridLine(x, ((k % 4) + 4) % 4 === 0 ? k / 4 + 1 : null);
+      }
+    } else if (!this.songMode && this.lesson) {
+      const b0 = Math.ceil(this.anchor.beat + (now - (hitX - headerW) / pxPerSec - this.anchor.time) / this.spb);
+      const b1 = Math.floor(this.anchor.beat + (now + (w - hitX) / pxPerSec - this.anchor.time) / this.spb);
+      for (let b = Math.max(b0, -this.lesson.countInBeats); b <= Math.min(b1, this.lesson.totalBeats); b++) {
+        gridLine(xAt(this.anchor.time + (b - this.anchor.beat) * this.spb), b >= 0 && b % 4 === 0 ? b / 4 + 1 : null);
       }
     }
 
-    // connector glow: lane → pad
-    for (let i = 0; i < LANES.length; i++) {
-      const cx = i * laneW + laneW / 2;
-      const g = ctx.createLinearGradient(0, hitY, 0, h);
-      g.addColorStop(0, hexA(LANE_COLOR[LANES[i]], 0.16));
-      g.addColorStop(1, hexA(LANE_COLOR[LANES[i]], 0.02));
-      ctx.fillStyle = g;
-      ctx.fillRect(cx - 3, hitY, 6, h - hitY);
-    }
-
-    // hit line + targets
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.fillRect(0, hitY - 1.5, w, 3);
-    ctx.shadowColor = 'rgba(255,255,255,0.35)';
-    ctx.shadowBlur = 8;
-    ctx.fillRect(0, hitY - 1.5, w, 3);
-    ctx.shadowBlur = 0;
-    for (let i = 0; i < LANES.length; i++) {
-      const lane = LANES[i];
-      const cx = i * laneW + laneW / 2;
+    // hit line + a target per row in the note's own shape
+    ctx.fillStyle = 'rgba(237,238,240,0.85)';
+    ctx.fillRect(hitX - 1, top, 2, h - top - bottom);
+    for (let i = 0; i < rows.length; i++) {
+      const lane = rows[i];
       const flash = this.flashTimes[lane];
-      const hot = flash !== undefined && now - flash < 0.12;
+      const hot = flash !== undefined && now - flash >= 0 && now - flash < 0.12;
       ctx.beginPath();
-      ctx.arc(cx, hitY, 34, 0, Math.PI * 2);
-      ctx.strokeStyle = LANE_COLOR[lane];
-      ctx.globalAlpha = hot ? 0.95 : 0.45;
-      ctx.lineWidth = hot ? 4 : 2;
+      ctx.roundRect(hitX - noteW / 2 - 3, rowY(i) - noteH / 2 - 3, noteW + 6, noteH + 6, 5);
+      ctx.strokeStyle = hexA(LANE_COLOR[lane], hot ? 0.95 : 0.4);
+      ctx.lineWidth = 1.5;
       ctx.stroke();
       if (hot) {
-        ctx.fillStyle = LANE_COLOR[lane];
-        ctx.globalAlpha = 0.22;
+        ctx.fillStyle = hexA(LANE_COLOR[lane], 0.3);
         ctx.fill();
       }
-      ctx.globalAlpha = 1;
-      ctx.lineWidth = 1;
     }
 
-    // notes
-    const horizon = (hitY + 60) / pxPerSec;
+    // notes: solid, no glow; missed ones slide on past the line and fade
     for (let i = 0; i < this.notes.length; i++) {
       const note = this.notes[i];
+      const row = rows.indexOf(note.lane);
+      if (row < 0) continue;
       const t = this.noteTime(i);
-      const y = hitY - (t - now) * pxPerSec;
-      if (y < -40 || t < now - horizon) continue;
-      const laneIdx = LANES.indexOf(note.lane);
-      const x = laneIdx * laneW + laneW * 0.14;
+      const x = xAt(t);
+      if (x > w + 20) break;
+      if (x < headerW - 20) continue;
       const j = this.judged[i];
+      if (j !== null && j !== 'miss') continue; // hit notes pop (drawEffects)
+      const y = rowY(row);
+      ctx.beginPath();
+      ctx.roundRect(x - noteW / 2, y - noteH / 2, noteW, noteH, 4);
       if (j === 'miss') {
-        // the missed note keeps falling past the line as a fading ✕
-        const fade = 1 - (now - t) / 0.5;
+        const fade = 1 - (now - t) / 0.6;
         if (fade <= 0) continue;
-        ctx.globalAlpha = 0.7 * Math.min(1, fade);
-        ctx.strokeStyle = '#f87171';
-        ctx.lineWidth = 3;
-        const cx = laneIdx * laneW + laneW / 2;
-        const cy = y;
-        const s = 8;
-        ctx.beginPath();
-        ctx.moveTo(cx - s, cy - s);
-        ctx.lineTo(cx + s, cy + s);
-        ctx.moveTo(cx + s, cy - s);
-        ctx.lineTo(cx - s, cy + s);
+        ctx.strokeStyle = hexA(INK.bad, 0.8 * Math.min(1, fade));
+        ctx.lineWidth = 2;
         ctx.stroke();
-        ctx.globalAlpha = 1;
         continue;
       }
-      if (j !== null) continue; // hit notes vanish
       ctx.fillStyle = LANE_COLOR[note.lane];
-      ctx.shadowColor = LANE_COLOR[note.lane];
-      ctx.shadowBlur = 14;
-      const r = 7;
-      ctx.beginPath();
-      ctx.roundRect(x, y - 9, laneW * 0.72, 18, r);
       ctx.fill();
-      ctx.shadowBlur = 0;
     }
 
-    this.drawEffects(ctx, now, laneW, hitY, h);
+    this.drawEffects(ctx, now, geo);
 
-    // floating texts (combo milestones, wait prompts)
-    this.floats = this.floats.filter((f) => now - f.at < 0.8);
+    // row headers sit above everything: they are the lane labels and the pads
+    ctx.fillStyle = INK.header;
+    ctx.fillRect(0, 0, headerW, h);
+    ctx.fillStyle = INK.line;
+    ctx.fillRect(headerW - 1, 0, 1, h);
+    for (let i = 0; i < rows.length; i++) {
+      const lane = rows[i];
+      const y = rowY(i);
+      const flash = this.flashTimes[lane];
+      const hot = flash !== undefined && now - flash >= 0 && now - flash < 0.15;
+      if (hot) {
+        ctx.fillStyle = hexA(LANE_COLOR[lane], 0.14);
+        ctx.fillRect(0, top + i * rowH + 1, headerW - 1, rowH - 1);
+      }
+      ctx.fillStyle = LANE_COLOR[lane];
+      ctx.fillRect(0, top + i * rowH + 6, 3, rowH - 12);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = INK.text;
+      ctx.font = `550 13px ${FONT}`;
+      ctx.fillText(LANE_LABEL[lane], 16, y + (rowH > 44 ? -2 : 4));
+      if (rowH > 44) {
+        ctx.fillStyle = INK.text3;
+        ctx.font = `500 11px ${MONO}`;
+        ctx.fillText(KEY_HINT[lane], 16, y + 14);
+      }
+      ctx.fillStyle = INK.line;
+      ctx.fillRect(0, Math.round(top + (i + 1) * rowH), headerW, 1);
+    }
+
+    const midX = hitX + (w - hitX) / 2;
+    // combo milestones
+    this.floats = this.floats.filter((f) => now - f.at < 0.9);
     for (const f of this.floats) {
       const age = now - f.at;
-      // above the lane judgments, so the two never overlap
-      const y = hitY - 150 - age * 60;
-      ctx.globalAlpha = age < 0.35 ? 1 : 1 - (age - 0.35) / 0.45;
+      ctx.globalAlpha = age < 0.4 ? 1 : Math.max(0, 1 - (age - 0.4) / 0.5);
       ctx.fillStyle = f.color;
-      ctx.font = '800 26px "Avenir Next", system-ui, sans-serif';
+      ctx.font = `650 17px ${FONT}`;
       ctx.textAlign = 'center';
-      ctx.fillText(f.text, w / 2, y);
+      ctx.fillText(f.text, midX, top + 30 - age * 14);
       ctx.globalAlpha = 1;
     }
 
@@ -947,139 +1014,138 @@ export class GameEngine {
     const syncK = this.syncCount();
     if (this.phase === 'countin' || syncK > 0) {
       const countInBeats = this.songMode ? (this.chart?.countInBeats ?? 4) : (this.lesson?.countInBeats ?? 4);
-      const k = syncK > 0 ? syncK : Math.min(
-        countInBeats,
-        Math.max(1, Math.floor(this.musicBeatNow()) + countInBeats + 1),
-      );
-      ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.font = '800 72px "Avenir Next", system-ui, sans-serif';
+      const k = syncK > 0 ? syncK : Math.min(countInBeats, Math.max(1, Math.floor(this.musicBeatNow()) + countInBeats + 1));
       ctx.textAlign = 'center';
-      ctx.fillText(String(k), w / 2, h / 2 - 10);
-      ctx.font = '600 16px "Avenir Next", system-ui, sans-serif';
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.fillText('GET READY', w / 2, h / 2 + 28);
+      ctx.fillStyle = 'rgba(13,14,16,0.72)';
+      ctx.beginPath();
+      ctx.roundRect(midX - 70, h / 2 - 62, 140, 112, 12);
+      ctx.fill();
+      ctx.fillStyle = INK.text;
+      ctx.font = `500 64px ${MONO}`;
+      ctx.fillText(String(k), midX, h / 2 + 12);
+      ctx.font = `500 13px ${FONT}`;
+      ctx.fillStyle = INK.text2;
+      ctx.fillText(`Count-in ${k} of ${countInBeats}`, midX, h / 2 + 36);
     }
 
     // wait mode prompt
     if (this.paused && this.pauseReason === 'wait') {
       const lane = this.notes[this.waitIdx]?.lane ?? 'kick';
-      ctx.fillStyle = '#f87171';
-      ctx.font = '700 22px "Avenir Next", system-ui, sans-serif';
+      ctx.fillStyle = INK.text;
+      ctx.font = `600 16px ${FONT}`;
       ctx.textAlign = 'center';
-      ctx.fillText(`HIT ${LANE_LABEL[lane].toUpperCase()} TO CONTINUE`, w / 2, h / 2 - 30);
+      ctx.fillText(`Hit ${LANE_LABEL[lane].toLowerCase()} to continue`, midX, top + 32);
     }
   }
 
   /**
-   * Hit feedback at the lane target: the note pops, a ring bursts outward,
-   * sparks fly, and the judgment (with EARLY/LATE when off) rises above the
-   * lane. A miss tints the lane red.
+   * Hit feedback at the row's target: the note pops, a ring bursts, sparks
+   * fly, the row lights up behind the line, and the judgment (with how early
+   * or late) sits just after the line. A miss tints the row red.
    */
-  private drawEffects(ctx: CanvasRenderingContext2D, now: number, laneW: number, hitY: number, h: number) {
+  private drawEffects(ctx: CanvasRenderingContext2D, now: number, g: Geo) {
     this.effects = this.effects.filter((e) => now - e.at < EFFECT_LIFE && now >= e.at - 0.05);
-    // one judgment label per lane: a newer hit replaces the older text
     const newest: Partial<Record<Lane, number>> = {};
     for (const e of this.effects) newest[e.lane] = Math.max(newest[e.lane] ?? -Infinity, e.at);
+    const noteH = Math.min(46, Math.max(14, g.rowH * 0.46));
     for (const e of this.effects) {
+      const row = g.rows.indexOf(e.lane);
+      if (row < 0) continue;
       const showText = newest[e.lane] === e.at;
       const age = Math.max(0, now - e.at);
-      const k = age / EFFECT_LIFE; // 0 → 1
-      const cx = LANES.indexOf(e.lane) * laneW + laneW / 2;
+      const k = age / EFFECT_LIFE;
+      const cy = g.top + g.rowH * (row + 0.5);
+      const rowTop = g.top + g.rowH * row;
       const color = LANE_COLOR[e.lane];
+      const textY = rowTop + Math.min(18, g.rowH * 0.22) + 2;
 
       if (e.judge === 'miss') {
-        const a = Math.max(0, 1 - age / 0.25);
-        ctx.fillStyle = `rgba(248,113,113,${0.16 * a})`;
-        ctx.fillRect(cx - laneW / 2, 0, laneW, h);
-        if (showText) {
-          ctx.globalAlpha = Math.max(0, 1 - k * 1.4);
+        if (!showText) continue;
+        const a = Math.max(0, 1 - age / 0.3);
+        ctx.fillStyle = `rgba(229,83,75,${0.07 * a})`;
+        ctx.fillRect(g.headerW, rowTop + 1, g.w - g.headerW, g.rowH - 1);
+        {
+          ctx.globalAlpha = Math.max(0, 1 - k * 1.3);
           ctx.fillStyle = JUDGE_COLOR.miss;
-          ctx.font = '800 15px "Avenir Next", system-ui, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText('MISS', cx, hitY - 48 - age * 40);
+          ctx.font = `600 12px ${FONT}`;
+          ctx.textAlign = 'left';
+          ctx.fillText('Miss', g.hitX + 14, textY);
           ctx.globalAlpha = 1;
         }
         continue;
       }
 
-      // lane glow + target fill
-      const flash = Math.max(0, 1 - age / 0.18);
+      // the row lights up just past the line
+      const flash = Math.max(0, 1 - age / 0.22);
       if (flash > 0) {
-        const g = ctx.createLinearGradient(0, hitY - 220, 0, hitY);
-        g.addColorStop(0, hexA(color, 0));
-        g.addColorStop(1, hexA(color, 0.28 * flash));
-        ctx.fillStyle = g;
-        ctx.fillRect(cx - laneW / 2, hitY - 220, laneW, 220);
-        ctx.beginPath();
-        ctx.arc(cx, hitY, 34, 0, Math.PI * 2);
-        ctx.fillStyle = hexA(color, 0.55 * flash);
-        ctx.fill();
+        const glow = ctx.createLinearGradient(g.hitX, 0, g.hitX + 220, 0);
+        glow.addColorStop(0, hexA(color, 0.22 * flash));
+        glow.addColorStop(1, hexA(color, 0));
+        ctx.fillStyle = glow;
+        ctx.fillRect(g.hitX, rowTop + 1, 220, g.rowH - 1);
       }
 
       // the note pops on the line
       const pop = Math.max(0, 1 - age / 0.16);
       if (pop > 0) {
-        const s = 1 + (1 - pop) * 0.45;
-        const bw = laneW * 0.72 * s;
+        const s = 1 + (1 - pop) * 0.5;
         ctx.globalAlpha = pop;
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
-        ctx.roundRect(cx - bw / 2, hitY - 9 * s, bw, 18 * s, 7 * s);
+        ctx.roundRect(g.hitX - 9 * s, cy - (noteH / 2) * s, 18 * s, noteH * s, 4 * s);
         ctx.fill();
         ctx.globalAlpha = 1;
       }
 
-      // expanding rings (perfect gets a second, gold ring)
-      const ease = 1 - (1 - Math.min(1, age / 0.32)) ** 3;
-      const ringA = Math.max(0, 1 - age / 0.32);
+      // ring (gold second ring on a perfect)
+      const ease = 1 - (1 - Math.min(1, age / 0.3)) ** 3;
+      const ringA = Math.max(0, 1 - age / 0.3);
+      const r0 = noteH / 2 + 4;
       if (ringA > 0) {
-        ctx.lineWidth = 4 * ringA + 1;
+        ctx.lineWidth = 3 * ringA + 1;
         ctx.strokeStyle = hexA(color, ringA);
         ctx.beginPath();
-        ctx.arc(cx, hitY, 34 + ease * 34, 0, Math.PI * 2);
+        ctx.arc(g.hitX, cy, r0 + ease * 26, 0, Math.PI * 2);
         ctx.stroke();
         if (e.judge === 'perfect') {
+          ctx.lineWidth = 1.5;
           ctx.strokeStyle = hexA(JUDGE_COLOR.perfect, ringA * 0.8);
-          ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.arc(cx, hitY, 34 + ease * 52, 0, Math.PI * 2);
+          ctx.arc(g.hitX, cy, r0 + ease * 40, 0, Math.PI * 2);
           ctx.stroke();
         }
         ctx.lineWidth = 1;
       }
 
       // sparks
-      const sparks = e.judge === 'perfect' ? 12 : e.judge === 'great' ? 9 : 6;
+      const sparks = e.judge === 'perfect' ? 10 : e.judge === 'great' ? 7 : 5;
       let r = e.seed * 9301 + 49297;
-      const rand = () => ((r = (r * 9301 + 49297) % 233280) / 233280);
-      const sparkA = Math.max(0, 1 - age / 0.42);
+      const rand = () => (r = (r * 9301 + 49297) % 233280) / 233280;
+      const sparkA = Math.max(0, 1 - age / 0.4);
       if (sparkA > 0) {
         ctx.fillStyle = hexA(color, sparkA);
         for (let i = 0; i < sparks; i++) {
           const ang = (i / sparks) * Math.PI * 2 + rand() * 0.5;
-          const speed = 150 + rand() * 170;
-          const d = 30 + speed * age;
-          const size = 3.2 * sparkA + 0.6;
+          const d = r0 + (110 + rand() * 140) * age;
           ctx.beginPath();
-          ctx.arc(cx + Math.cos(ang) * d, hitY + Math.sin(ang) * d * 0.8, size, 0, Math.PI * 2);
+          ctx.arc(g.hitX + Math.cos(ang) * d, cy + Math.sin(ang) * d * 0.75, 2.6 * sparkA + 0.6, 0, Math.PI * 2);
           ctx.fill();
         }
       }
 
-      // judgment above the lane, with EARLY / LATE when it matters
+      // judgment just after the line, in the top of the row
       if (!showText) continue;
-      const textA = age < 0.3 ? 1 : Math.max(0, 1 - (age - 0.3) / 0.25);
-      const rise = age * 70;
-      const scale = 1 + Math.max(0, 0.12 - age) * 2.5;
-      ctx.globalAlpha = textA;
-      ctx.textAlign = 'center';
+      ctx.globalAlpha = age < 0.3 ? 1 : Math.max(0, 1 - (age - 0.3) / 0.25);
+      ctx.textAlign = 'left';
       ctx.fillStyle = JUDGE_COLOR[e.judge];
-      ctx.font = `800 ${Math.round(17 * scale)}px "Avenir Next", system-ui, sans-serif`;
-      ctx.fillText(e.judge.toUpperCase(), cx, hitY - 50 - rise);
+      ctx.font = `650 ${age < 0.08 ? 13 : 12}px ${FONT}`;
+      const label = JUDGE_TEXT[e.judge];
+      ctx.fillText(label, g.hitX + 14, textY);
       if (e.judge !== 'perfect' && Math.abs(e.delta) > 0.02) {
-        ctx.font = '700 11px "Avenir Next", system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.75)';
-        ctx.fillText(`${e.delta < 0 ? 'EARLY' : 'LATE'} ${Math.round(Math.abs(e.delta) * 1000)}ms`, cx, hitY - 34 - rise);
+        const lw = ctx.measureText(label).width;
+        ctx.fillStyle = INK.text2;
+        ctx.font = `500 11px ${MONO}`;
+        ctx.fillText(`${Math.round(Math.abs(e.delta) * 1000)} ms ${e.delta < 0 ? 'early' : 'late'}`, g.hitX + 20 + lw, textY);
       }
       ctx.globalAlpha = 1;
     }
