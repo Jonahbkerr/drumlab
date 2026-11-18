@@ -29,14 +29,22 @@ export default function ChartPreview({ chart }: { chart: SongChart }) {
     });
     const busy = perBar.filter((c) => c > 0).sort((a, b) => a - b);
     const typical = busy[Math.floor(busy.length / 2)] ?? 0;
+    // ...and that has the groove's kick and snare in every bar (not a hats-only intro)
+    const used = new Set(chart.notes.map((n) => n.lane));
+    const core = (['kick', 'snare'] as Lane[]).filter((l) => used.has(l));
+    const hasCore = (bar: number) =>
+      core.every((lane) => {
+        for (let s = bar * 16; s < (bar + 1) * 16; s++) if (bySlot.get(s)?.has(lane)) return true;
+        return false;
+      });
     let start = 0;
     for (let bar = 0; bar + BARS <= totalBars; bar++) {
-      if (perBar.slice(bar, bar + BARS).every((c) => c >= typical * 0.75)) {
+      const window = Array.from({ length: BARS }, (_, k) => bar + k);
+      if (window.every((b) => perBar[b] >= typical * 0.75 && hasCore(b))) {
         start = bar;
         break;
       }
     }
-    const used = new Set(chart.notes.map((n) => n.lane));
     const rows = ROWS.filter((l) => used.has(l));
     const at = grid.slotTime((down + start * 4) * 4);
     return { rows, bySlot, start, at };
