@@ -22,6 +22,21 @@ hits; a drum's ring glows as its next note comes up and flashes red on a miss.
 On the Kit page, click a drum and hit a pad to assign it. Hide the kit from the
 play screen's settings panel.
 
+A USB piano keyboard plays the drums too, the same way in every octave:
+
+| Key | C | C# | D | D# | E | F | F# | G | G# | A | A# | B |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Drum | kick | crash | snare | crash | snare | low tom | hi-hat | low tom | hi-hat | high tom | hi-hat | high tom |
+
+It follows General MIDI's drum octave where the two agree (C kick, D snare,
+F#/G#/A# hi-hats, C# crash, D# ride). Notes on channel 10, the drum channel,
+keep the drum map, so drum kits and the drum pads on keyboards work as before;
+notes on any other channel use this layout. The Kit page draws the octave,
+moves a drum to another key (click the drum, then press the key, on the
+keyboard or the drawing), and can mark a device as a drum kit if a kit sends on
+another channel. After you play a piano key, the drums and chart rows show
+piano notes instead of D F J K L ;, until you press a computer key again.
+
 ## How song charts are made
 
 `src/engine/chart/`

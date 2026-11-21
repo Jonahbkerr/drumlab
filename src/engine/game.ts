@@ -81,8 +81,6 @@ const INK = {
   accent: '#f06a37',
   bad: '#e5534b',
 };
-/** keyboard key per lane, shown under each row label */
-const KEY_HINT = LANE_KEY;
 
 const FONT = "'Geist Variable', 'Helvetica Neue', Arial, sans-serif";
 const MONO = "'Geist Mono Variable', ui-monospace, Menlo, monospace";
@@ -212,6 +210,8 @@ export class GameEngine {
   onResult: (r: RunResult) => void = () => {};
   /** a pad was hit (any lane, judged or not); vel 0..1 */
   onFlash: (lane: Lane, vel: number) => void = () => {};
+  /** the key that plays each lane (computer or piano), shown under each row label */
+  keyHints: Record<Lane, string> = { ...LANE_KEY };
   /** a note went by unplayed */
   onMiss: (lane: Lane) => void = () => {};
   /** once per frame, after drawing */
@@ -1035,7 +1035,7 @@ export class GameEngine {
       if (rowH > 44) {
         ctx.fillStyle = INK.text3;
         ctx.font = `500 11px ${MONO}`;
-        ctx.fillText(KEY_HINT[lane], 16, y + 14);
+        ctx.fillText(this.keyHints[lane], 16, y + 14);
       }
       ctx.fillStyle = INK.line;
       ctx.fillRect(0, Math.round(top + (i + 1) * rowH), headerW, 1);

@@ -4,7 +4,7 @@ import type { GameMode, Hud, RunResult } from '../engine/game';
 import type { Lesson } from '../engine/types';
 import type { SongChart } from '../engine/transcribe';
 import { sharedAudio } from '../engine/audio';
-import { LANE_KEY, MidiManager } from '../engine/midi';
+import { MidiManager, laneHints, loadLabelSource, loadPianoLayout, saveLabelSource } from '../engine/midi';
 import { LANES, LANE_LABEL } from '../engine/types';
 import type { Lane } from '../engine/types';
 import Icon from './Icon';
@@ -39,8 +39,6 @@ const readShowKit = () => {
   }
 };
 
-/** each drum's name and its keyboard key, under the drawn kit */
-const KIT_LABELS = Object.fromEntries(LANES.map((l) => [l, { name: LANE_LABEL[l], hint: LANE_KEY[l] }])) as Record<Lane, KitLabel>;
 
 const fmtSec = (s: number) => {
   const m = Math.floor(s / 60);
@@ -60,6 +58,15 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const kitRef = useRef<KitHandle | null>(null);
   const [showKit, setShowKit] = useState(readShowKit);
+  // the drums show the computer key or the piano key that plays them: whichever was played last
+  const [labelSource, setLabelSource] = useState(loadLabelSource);
+  const labelRef = useRef(labelSource);
+  const [pianoLayout] = useState(loadPianoLayout);
+  const hints = useMemo(() => laneHints(labelSource, pianoLayout), [labelSource, pianoLayout]);
+  const kitLabels = useMemo(
+    () => Object.fromEntries(LANES.map((l) => [l, { name: LANE_LABEL[l], hint: hints[l] }])) as Record<Lane, KitLabel>,
+    [hints],
+  );
   const [hud, setHud] = useState<Hud | null>(null);
   const [mode, setMode] = useState<GameMode>(initialMode ?? 'performance');
   const [sectionIdx, setSectionIdx] = useState(-1);
@@ -114,7 +121,14 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
 
   // MIDI + keyboard
   useEffect(() => {
-    const mm = new MidiManager((lane, vel, at) => engine.hit(lane, vel, at));
+    const mm = new MidiManager((lane, vel, at, source) => {
+      engine.hit(lane, vel, at);
+      if (source !== 'kit' && source !== labelRef.current) {
+        labelRef.current = source;
+        saveLabelSource(source);
+        setLabelSource(source);
+      }
+    });
     mm.attachKeyboard();
     let cancelled = false;
     void mm.init().then((s) => {
@@ -125,6 +139,10 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
       mm.detach();
     };
   }, [engine]);
+
+  useEffect(() => {
+    engine.keyHints = hints;
+  }, [engine, hints]);
 
   // clicking a drum on the drawn kit plays it, like the row labels do
   const padHit = useCallback((lane: Lane, at: number) => engine.hit(lane, 1, at), [engine]);
@@ -237,7 +255,7 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
         </div>
         {showKit && (
           <div className="stage-kit">
-            <KitView ref={kitRef} labels={KIT_LABELS} inUse={inUse} compact onPad={padHit} />
+            <KitView ref={kitRef} labels={kitLabels} inUse={inUse} compact onPad={padHit} />
           </div>
         )}
 

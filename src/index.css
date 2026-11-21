@@ -1026,6 +1026,114 @@ input[type='range'] {
   font-weight: 600;
 }
 
+/* Kit page: piano keyboard, one octave, each key tinted with its drum */
+.piano-sec {
+  margin-top: 36px;
+}
+.piano-body {
+  display: grid;
+  grid-template-columns: minmax(0, 460px) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+.piano {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+.piano-side {
+  display: grid;
+  gap: 14px;
+  max-width: 360px;
+}
+.piano-side p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+.piano-side b {
+  color: var(--text);
+  font-weight: 600;
+}
+.piano-side .btn {
+  justify-self: start;
+}
+.piano-device {
+  display: grid;
+  gap: 4px;
+}
+.pk {
+  cursor: pointer;
+}
+.pk-white .pk-key {
+  fill: #d8d4ca;
+  stroke: #0d0f12;
+  stroke-width: 1;
+}
+.pk-white:hover .pk-key {
+  fill: #e6e2d8;
+}
+.pk-black .pk-key {
+  fill: #1b1e22;
+  stroke: #0a0b0d;
+  stroke-width: 1.5;
+}
+.pk-black:hover .pk-key {
+  fill: #272b31;
+}
+.pk-band {
+  fill: var(--c);
+}
+.pk-name {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 650;
+  fill: #15171a;
+  text-anchor: middle;
+  pointer-events: none;
+}
+.pk-top {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--c);
+  text-anchor: middle;
+  pointer-events: none;
+}
+.pk-note {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  text-anchor: middle;
+  pointer-events: none;
+}
+.pk-white .pk-note {
+  fill: #6b675f;
+}
+.pk-black .pk-note {
+  fill: #8a9099;
+  font-size: 10.5px;
+}
+.pk-flash {
+  fill: var(--c);
+  opacity: 0;
+  pointer-events: none;
+}
+.pk-sel {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  opacity: 0;
+  pointer-events: none;
+}
+.pk.sel .pk-sel {
+  opacity: 1;
+}
+
 /* ───────────────────────────── results ───────────────────────────── */
 .results {
   display: grid;
@@ -1360,6 +1468,7 @@ input[type='range'] {
   }
   .import-grid,
   .kit-grid,
+  .piano-body,
   .results {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1379,5 +1488,29 @@ input[type='range'] {
   }
   .play-stats {
     gap: 14px;
+  }
+}
+
+/* phones: a pad row is name and button, with its pad underneath */
+@media (max-width: 560px) {
+  .map-row {
+    grid-template-columns: 12px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'sw name act'
+      '. note act';
+    row-gap: 3px;
+    padding: 10px 4px;
+  }
+  .map-row > .swatch {
+    grid-area: sw;
+  }
+  .map-row > span:nth-child(2) {
+    grid-area: name;
+  }
+  .map-row > .map-note {
+    grid-area: note;
+  }
+  .map-row > .map-actions {
+    grid-area: act;
   }
 }
