@@ -1,16 +1,27 @@
-export type Lane = 'kick' | 'snare' | 'hh' | 'tomLo' | 'tomHi' | 'crash';
+export type Lane = 'kick' | 'snare' | 'hh' | 'hhOpen' | 'tomLo' | 'tomHi' | 'crash';
 export type PathId = 'rudiments' | 'grooves' | 'fills';
 
-export const LANES: Lane[] = ['kick', 'snare', 'hh', 'tomLo', 'tomHi', 'crash'];
+export const LANES: Lane[] = ['kick', 'snare', 'hh', 'hhOpen', 'tomLo', 'tomHi', 'crash'];
 
 export const LANE_LABEL: Record<Lane, string> = {
   kick: 'Kick',
   snare: 'Snare',
   hh: 'Hi-Hat',
+  hhOpen: 'Open Hat',
   tomLo: 'Low Tom',
   tomHi: 'High Tom',
   crash: 'Crash',
 };
+
+/**
+ * Does a hit on `hit` play a note on `note`? Each drum plays its own notes,
+ * and an open hi-hat also plays a hi-hat note: song charts have one hi-hat
+ * (the transcription can't tell open from closed), so opening it where the
+ * record does must still count. An open-hat note needs the open hat.
+ */
+export function plays(hit: Lane, note: Lane): boolean {
+  return hit === note || (hit === 'hhOpen' && note === 'hh');
+}
 
 /** t = beat position from bar 1 beat 1 (beat 0). Drums are hits, so no duration. */
 export interface Note {

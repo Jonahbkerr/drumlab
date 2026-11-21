@@ -200,7 +200,7 @@ export function arrange(hits: Hit[], grid: BeatGrid, opts: ArrangeOpts): ChartNo
   if (level <= 1) notes = notes.filter((n) => n.slot % 4 === 0); // on the beat only
 
   // 3. two hands: at most two hand drums at once (crash > snare > toms > hat)
-  const handRank: Record<Lane, number> = { crash: 0, snare: 1, tomHi: 2, tomLo: 2, hh: 3, kick: 9 };
+  const handRank: Record<Lane, number> = { crash: 0, snare: 1, tomHi: 2, tomLo: 2, hh: 3, hhOpen: 3, kick: 9 };
   const slots = new Map<number, typeof notes>();
   for (const n of notes) {
     const arr = slots.get(n.slot) ?? [];

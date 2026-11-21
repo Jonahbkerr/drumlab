@@ -85,8 +85,8 @@ export class DrumAudio {
     q: number,
     dur: number,
     vol: number,
-  ) {
-    if (!this.ctx || !this.master || !this.noiseBuf) return;
+  ): GainNode | null {
+    if (!this.ctx || !this.master || !this.noiseBuf) return null;
     const src = this.ctx.createBufferSource();
     src.buffer = this.noiseBuf;
     src.loop = true;
@@ -102,6 +102,23 @@ export class DrumAudio {
     g.connect(this.master);
     src.start(t);
     src.stop(t + dur + 0.02);
+    return g;
+  }
+
+  /** the open hi-hat still ringing, so closing the hat can cut it off */
+  private openHat: GainNode | null = null;
+
+  /** closing the hi-hat (a closed hit) chokes a ringing open hat, as on a real kit */
+  private chokeOpenHat(t: number) {
+    const g = this.openHat?.gain;
+    this.openHat = null;
+    if (!g) return;
+    if (typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(t);
+    else {
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+    }
+    g.exponentialRampToValueAtTime(0.0001, t + 0.045);
   }
 
   /** metronome click */
@@ -123,8 +140,17 @@ export class DrumAudio {
         this.noise(t, 'bandpass', 1900, 1.1, 0.16, 0.7 * vel);
         break;
       case 'hh':
+        this.chokeOpenHat(t);
         this.noise(t, 'highpass', 7600, 1, 0.07, 0.42 * vel);
         break;
+      case 'hhOpen': {
+        // two plates ringing: a bright wash that lasts most of a second, and a
+        // shorter sizzle on top; a closed hit chokes the wash (the sizzle is gone by then)
+        this.chokeOpenHat(t);
+        this.openHat = this.noise(t, 'highpass', 6800, 1, 0.9, 0.34 * vel);
+        this.noise(t, 'bandpass', 9800, 0.9, 0.22, 0.14 * vel);
+        break;
+      }
       case 'tomLo':
         this.tone(t, 'sine', 170, 88, 0.32, 0.75 * vel);
         break;

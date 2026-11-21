@@ -2,7 +2,7 @@ import type { Lesson, Lane, Note, PathDef } from '../engine/types';
 
 export const PATHS: PathDef[] = [
   { id: 'rudiments', name: 'Rudiments', blurb: 'Stick control basics. Pad, table, or kit — any surface works.', emoji: '🥁' },
-  { id: 'grooves', name: 'Grooves', blurb: 'Kit beats from rock to trap. Kick, snare, hats.', emoji: '🎵' },
+  { id: 'grooves', name: 'Grooves', blurb: 'Kit beats from rock to disco to trap. Kick, snare, hats.', emoji: '🎵' },
   { id: 'fills', name: 'Fills', blurb: 'Around-the-kit moves, tom cascades, crashes.', emoji: '🔥' },
 ];
 
@@ -125,6 +125,32 @@ const lessons: Lesson[] = [
       { start: 4, end: 8, name: 'Bar 2' },
       { start: 8, end: 12, name: 'Bar 3' },
       { start: 12, end: 16, name: 'Bar 4' },
+    ],
+  },
+  {
+    id: 'grv-disco',
+    title: 'Disco Hats',
+    pathId: 'grooves',
+    difficulty: 2,
+    bpm: 96,
+    desc: 'Four on the floor with the hi-hat opened on every off-beat. Open it on the and, close it on the beat.',
+    totalBeats: 24,
+    countInBeats: 4,
+    notes: (() => {
+      const out: Note[] = [];
+      for (let b = 0; b < 24; b++) {
+        out.push(n('kick', b));
+        out.push(n('hh', b));
+        // two bars of closed eighths, then the and of every beat opens
+        out.push(n(b < 8 ? 'hh' : 'hhOpen', b + 0.5));
+      }
+      for (let b = 1; b < 24; b += 2) out.push(n('snare', b)); // beats 2 & 4
+      return out;
+    })(),
+    sections: [
+      { start: 0, end: 8, name: 'Closed' },
+      { start: 8, end: 16, name: 'Open on the and' },
+      { start: 16, end: 24, name: 'Open on the and' },
     ],
   },
   {

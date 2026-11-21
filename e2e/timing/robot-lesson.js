@@ -2,7 +2,7 @@
 // (sample-accurate), and hits every note on the beat grid those clicks define,
 // at the moment that grid is HEARD. Pad sounds are silenced so only clicks are heard.
 (() => {
-  const KEY = { kick: 'KeyD', snare: 'KeyF', hh: 'KeyJ', tomLo: 'KeyK', tomHi: 'KeyL', crash: 'Semicolon' };
+  const KEY = { kick: 'KeyD', snare: 'KeyF', hh: 'KeyJ', hhOpen: 'KeyU', tomLo: 'KeyK', tomHi: 'KeyL', crash: 'Semicolon' };
   const e = window.__engine;
   const ctx = e.audio.context();
   e.audio.hit = () => {}; // keep the stream to clicks only

@@ -4,7 +4,8 @@ import { LANES } from '../engine/types';
 import type { Lane } from '../engine/types';
 
 /**
- * The drum kit, drawn: hi-hat, snare, kick, high tom, low tom, crash.
+ * The drum kit, drawn: hi-hat, snare, kick, high tom, low tom, crash. The
+ * open hi-hat is the same stand: an open hit lifts the top cymbal.
  * Each piece lights up in its lane colour when its pad is hit, glows as its
  * next note comes up, and flashes red when a note on it goes by unplayed.
  * Animations run straight on the SVG nodes (no React state per frame).
@@ -41,6 +42,7 @@ const LANE_VAR: Record<Lane, string> = {
   kick: 'var(--kick)',
   snare: 'var(--snare)',
   hh: 'var(--hh)',
+  hhOpen: 'var(--hhopen)',
   tomLo: 'var(--tomlo)',
   tomHi: 'var(--tomhi)',
   crash: 'var(--crash)',
@@ -70,6 +72,15 @@ const MOTION: Record<Lane, { frames: Keyframe[]; ms: number }> = {
       { transform: 'translateY(0px) rotate(0deg)' },
     ],
     ms: 260,
+  },
+  // the top cymbal lifts off the bottom one, rings, and settles back
+  hhOpen: {
+    frames: [
+      { transform: 'translateY(-9px)' },
+      { transform: 'translateY(-8px)', offset: 0.5 },
+      { transform: 'translateY(0px)' },
+    ],
+    ms: 620,
   },
   crash: {
     frames: [
@@ -108,10 +119,14 @@ function KitView({ ref, labels, inUse, selected, onPad, compact, className }: Pr
         const v = 0.5 + 0.5 * Math.min(1, Math.max(0, vel));
         const p = parts.current;
         // a drum this song doesn't use is dimmed: bring it up while it sounds
-        const g = p[`${lane}:g`];
-        if (g?.classList.contains('off')) {
-          g.animate([{ opacity: 1 }, { opacity: 1, offset: 0.35 }, { opacity: 0.3 }], { duration: 700, easing: 'ease-out' });
+        for (const key of lane === 'hhOpen' ? ['hhOpen:g', 'hh:g'] : [`${lane}:g`]) {
+          const g = p[key];
+          if (g?.classList.contains('off')) {
+            g.animate([{ opacity: 1 }, { opacity: 1, offset: 0.35 }, { opacity: 0.3 }], { duration: 700, easing: 'ease-out' });
+          }
         }
+        // a closed hit shuts an open hi-hat
+        if (lane === 'hh') for (const a of p['hhOpen:body']?.getAnimations() ?? []) a.cancel();
         p[`${lane}:flash`]?.animate([{ opacity: 0.9 * v }, { opacity: 0 }], { duration: 380, easing: EASE_OUT });
         p[`${lane}:halo`]?.animate([{ opacity: 0.7 * v }, { opacity: 0 }], { duration: 560, easing: EASE_OUT });
         if (!reducedMotion()) {
@@ -280,12 +295,30 @@ function KitView({ ref, labels, inUse, selected, onPad, compact, className }: Pr
         <g ref={reg('hh:body')} className="kp-body">
           <ellipse cx={HH.cx} cy={HH.cy + 13} rx={HH.rx} ry={HH.ry} fill="#383126" />
           <ellipse cx={HH.cx} cy={HH.cy + 10.5} rx={HH.rx} ry={HH.ry} fill={url('bronze')} opacity="0.75" />
-          {cymbal('hh', HH)}
-          <rect className="kp-pole" x={HH.cx - 2.5} y={HH.cy - 12} width={5} height={8} rx={1} />
+          <g ref={reg('hhOpen:body')} className="kp-body">
+            {cymbal('hh', HH)}
+            <rect className="kp-pole" x={HH.cx - 2.5} y={HH.cy - 12} width={5} height={8} rx={1} />
+          </g>
         </g>
         <ellipse ref={reg('hh:miss')} className="kp-miss" cx={HH.cx} cy={HH.cy + 4} rx={HH.rx + 5} ry={HH.ry + 9} />
-        <ellipse className="kp-hit" cx={HH.cx} cy={HH.cy + 6} rx={HH.rx + 8} ry={30} />
+        {/* clicks from just under the Open Hat label down to the stand play the closed hat */}
+        <ellipse className="kp-hit" cx={HH.cx} cy={HH.cy - 6} rx={HH.rx + 8} ry={43} />
         {label('hh', HH.cx, HH.cy - (compact ? 30 : 28))}
+      </g>
+
+      {/* open hi-hat: same stand; its glow sits where the lifted top cymbal goes, its label above the hi-hat's */}
+      <g {...pieceProps('hhOpen', 'cym')}>
+        {/* drawn over the hi-hat but never in the way of clicking it */}
+        <g pointerEvents="none">
+          <ellipse ref={reg('hhOpen:halo')} className="kp-halo" filter={url('blur')} cx={HH.cx} cy={HH.cy - 8} rx={HH.rx + 22} ry={24} />
+          <ellipse ref={reg('hhOpen:cue')} className="kp-cue" cx={HH.cx} cy={HH.cy - 9} rx={HH.rx} ry={HH.ry} />
+          <ellipse ref={reg('hhOpen:ring')} className="kp-ring kp-ring-ghost" cx={HH.cx} cy={HH.cy - 10} rx={HH.rx + 6} ry={HH.ry + 4} />
+          <ellipse ref={reg('hhOpen:flash')} className="kp-flash" cx={HH.cx} cy={HH.cy - 7} rx={HH.rx} ry={HH.ry + 3} />
+          <ellipse ref={reg('hhOpen:miss')} className="kp-miss" cx={HH.cx} cy={HH.cy - 10} rx={HH.rx + 5} ry={HH.ry + 5} />
+        </g>
+        {/* the band around its label, above the hi-hat's */}
+        <ellipse className="kp-hit" cx={HH.cx} cy={HH.cy - 63} rx={HH.rx + 8} ry={14} />
+        {label('hhOpen', HH.cx, HH.cy - (compact ? 61 : 55))}
       </g>
 
       {/* crash on a boom stand */}

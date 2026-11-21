@@ -14,10 +14,16 @@ npm run dev        # http://localhost:5173
 ```
 
 Plug the kit in over USB before opening the page (Chrome or Edge, which have
-Web MIDI). Kit setup maps pads to lanes; keyboard fallback is D F J K L ;.
+Web MIDI). Kit setup maps pads to lanes; keyboard fallback is D F J K L ;, with
+U (above J) for the open hi-hat.
 
 A drawn kit (hi-hat, snare, kick, high and low tom, crash) sits under the play
-chart and on the Kit page. Each pad hit lights its drum, brighter for harder
+chart and on the Kit page. The open hi-hat is its own instrument on the same
+stand: an open hit lifts the top cymbal and rings for most of a second, and the
+next closed hit chokes it, as on a real kit. It has its own chart row (lessons
+such as Disco Hats call for it); General MIDI note 46 plays it. Song charts have
+one hi-hat (the transcription can't tell open from closed), so an open hit
+also counts for a hi-hat note; an open-hat note needs the open hat. Each pad hit lights its drum, brighter for harder
 hits; a drum's ring glows as its next note comes up and flashes red on a miss.
 On the Kit page, click a drum and hit a pad to assign it. Hide the kit from the
 play screen's settings panel.
@@ -26,10 +32,10 @@ A USB piano keyboard plays the drums too, the same way in every octave:
 
 | Key | C | C# | D | D# | E | F | F# | G | G# | A | A# | B |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Drum | kick | crash | snare | crash | snare | low tom | hi-hat | low tom | hi-hat | high tom | hi-hat | high tom |
+| Drum | kick | crash | snare | crash | snare | low tom | hi-hat | low tom | hi-hat | high tom | open hat | high tom |
 
 It follows General MIDI's drum octave where the two agree (C kick, D snare,
-F#/G#/A# hi-hats, C# crash, D# ride). Notes on channel 10, the drum channel,
+F#/G# hi-hat, A# open hi-hat, C# crash, D# ride). Notes on channel 10, the drum channel,
 keep the drum map, so drum kits and the drum pads on keyboards work as before;
 notes on any other channel use this layout. The Kit page draws the octave,
 moves a drum to another key (click the drum, then press the key, on the

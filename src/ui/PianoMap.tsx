@@ -28,6 +28,7 @@ const LANE_VAR: Record<Lane, string> = {
   kick: 'var(--kick)',
   snare: 'var(--snare)',
   hh: 'var(--hh)',
+  hhOpen: 'var(--hhopen)',
   tomLo: 'var(--tomlo)',
   tomHi: 'var(--tomhi)',
   crash: 'var(--crash)',

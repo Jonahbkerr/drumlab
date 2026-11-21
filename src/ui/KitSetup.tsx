@@ -21,7 +21,7 @@ import PianoMap from './PianoMap';
 import type { PianoHandle } from './PianoMap';
 
 /** cymbals on top, kick at the bottom, like the play screen and drum notation */
-const ROWS: Lane[] = ['crash', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'];
+const ROWS: Lane[] = ['crash', 'hhOpen', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'];
 
 const KEY_FOR = LANE_KEY;
 
@@ -226,7 +226,7 @@ export default function KitSetup() {
           ) : connected ? (
             'Hit any pad or key and its drum lights up. Click a drum to give it a different pad or key.'
           ) : (
-            'Connect your kit, or press D F J K L ; to try it. Click a drum to choose its pad.'
+            'Connect your kit, or press D F J K L ; to try it (U opens the hi-hat). Click a drum to choose its pad.'
           )}
         </p>
       </section>

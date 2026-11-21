@@ -1,6 +1,6 @@
 import { sharedAudio } from './audio';
 import type { Lane, Lesson, Note, Section } from './types';
-import { LANES, LANE_LABEL } from './types';
+import { LANES, LANE_LABEL, plays } from './types';
 import { LANE_KEY } from './midi';
 import { GOOD_MS, JUDGE_SCORE, judgeDelta, starsForAccuracy } from './judge';
 import type { Judgement } from './judge';
@@ -56,13 +56,14 @@ const LANE_COLOR: Record<Lane, string> = {
   kick: '#f0703f',
   snare: '#e9b949',
   hh: '#56bee3',
+  hhOpen: '#a8d64f',
   tomLo: '#a08ceb',
   tomHi: '#e77bb0',
   crash: '#4cc08e',
 };
 
 /** play-screen rows, top to bottom: cymbals above, kick below, like drum notation */
-const ROW_ORDER: Lane[] = ['crash', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'];
+const ROW_ORDER: Lane[] = ['crash', 'hhOpen', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'];
 
 /** only the lanes a lesson or song uses get a row */
 function rowsFor(notes: { lane: Lane }[]): Lane[] {
@@ -218,7 +219,7 @@ export class GameEngine {
   onFrame: () => void = () => {};
 
   private emptyLaneCount(): Record<Lane, number> {
-    return { kick: 0, snare: 0, hh: 0, tomLo: 0, tomHi: 0, crash: 0 };
+    return Object.fromEntries(LANES.map((l) => [l, 0])) as Record<Lane, number>;
   }
 
   /** note-space seconds per note unit (beats for lessons, seconds for songs) */
@@ -605,7 +606,8 @@ export class GameEngine {
     // before) the first beat must still count
     if (this.phase !== 'playing' && this.phase !== 'countin') return;
     if (this.paused) {
-      if (this.pauseReason === 'wait' && this.notes[this.waitIdx]?.lane === lane) {
+      const waited = this.notes[this.waitIdx];
+      if (this.pauseReason === 'wait' && waited && plays(lane, waited.lane)) {
         this.paused = false;
         this.unfreezeClock();
         const t = this.notes[this.waitIdx].t;
@@ -626,7 +628,7 @@ export class GameEngine {
     let best = -1;
     let bestAbs = Infinity;
     for (let i = 0; i < this.notes.length; i++) {
-      if (this.judged[i] !== null || this.notes[i].lane !== lane) continue;
+      if (this.judged[i] !== null || !plays(lane, this.notes[i].lane)) continue;
       const d = Math.abs(this.noteTime(i) - now);
       if (d <= GOOD_MS && d < bestAbs) {
         best = i;
@@ -635,12 +637,14 @@ export class GameEngine {
     }
     if (best === -1) return; // ghost hit — sound played, no judge
 
+    // the note's own drum gets the credit (an open hat can play a hi-hat note)
+    const noteLane = this.notes[best].lane;
     const delta = now - this.noteTime(best);
     const j = judgeDelta(delta);
     this.judged[best] = j;
     this.deltas[best] = delta;
     this.hits++;
-    this.laneHit[lane]++;
+    this.laneHit[noteLane]++;
     if (j === 'perfect') this.perfects++;
     else if (j === 'great') this.greats++;
     else this.goods++;
@@ -659,7 +663,7 @@ export class GameEngine {
       this.lateSumMs += ms;
     }
     const shownAt = this.now();
-    this.effects.push({ lane, at: shownAt, judge: j, delta, seed: this.effectSeed++ });
+    this.effects.push({ lane: noteLane, at: shownAt, judge: j, delta, seed: this.effectSeed++ });
     if (this.combo >= 10 && this.combo % 10 === 0 && this.combo !== this.comboShown) {
       this.comboShown = this.combo;
       this.floats.push({ text: `${this.combo} in a row`, color: INK.accent, x: 0.5, at: shownAt });

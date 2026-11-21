@@ -82,7 +82,8 @@ export default function Home({ progress, onPlay }: Props) {
 
       <p className="howto">
         Play with a MIDI kit, or the keys
-        <span className="kbd">D</span> kick <span className="kbd">F</span> snare <span className="kbd">J</span> hi-hat
+        <span className="kbd">D</span> kick <span className="kbd">F</span> snare <span className="kbd">J</span> hi-hat{' '}
+        <span className="kbd">U</span> open hat
         <span className="kbd">K</span> low tom <span className="kbd">L</span> high tom <span className="kbd">;</span> crash
       </p>
     </>

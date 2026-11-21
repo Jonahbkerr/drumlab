@@ -2,7 +2,7 @@
 // the speakers (AudioContext.getOutputTimestamp), like a perfect human, then
 // reports how the game judged those hits. Also measures clock granularity.
 (() => {
-  const KEY = { kick: 'KeyD', snare: 'KeyF', hh: 'KeyJ', tomLo: 'KeyK', tomHi: 'KeyL', crash: 'Semicolon' };
+  const KEY = { kick: 'KeyD', snare: 'KeyF', hh: 'KeyJ', hhOpen: 'KeyU', tomLo: 'KeyK', tomHi: 'KeyL', crash: 'Semicolon' };
   const e = window.__engine;
   const ctx = e.audio.context();
 

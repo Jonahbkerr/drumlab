@@ -4,7 +4,7 @@ import type { SongChart } from '../engine/transcribe';
 import { LANE_LABEL } from '../engine/types';
 import type { Lane } from '../engine/types';
 
-const ROWS: Lane[] = ['crash', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'];
+const ROWS: Lane[] = ['crash', 'hhOpen', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'];
 const BARS = 2;
 
 /** Two bars of the chart as a drum grid, starting at the first busy bar. */

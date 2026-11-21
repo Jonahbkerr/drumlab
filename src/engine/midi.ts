@@ -1,10 +1,11 @@
 import type { Lane } from './types';
 
-/** Keyboard fallback: D F J K L ; (left to right). */
+/** Keyboard fallback: D F J K L ; (left to right), U (above J) opens the hi-hat. */
 export const KEY_TO_LANE: Record<string, Lane> = {
   KeyD: 'kick',
   KeyF: 'snare',
   KeyJ: 'hh',
+  KeyU: 'hhOpen',
   KeyK: 'tomLo',
   KeyL: 'tomHi',
   Semicolon: 'crash',
@@ -24,7 +25,7 @@ export const GM_TO_LANE: Record<number, Lane> = {
   40: 'snare',
   42: 'hh',
   44: 'hh',
-  46: 'hh',
+  46: 'hhOpen',
   41: 'tomLo',
   43: 'tomLo',
   45: 'tomLo',
@@ -47,8 +48,8 @@ export const noteName = (n: number) => `${NOTE_NAMES[n % 12]}${Math.floor(n / 12
 
 /**
  * Piano keyboards play the same drum in every octave, C to B. It follows
- * General MIDI's drum octave (C kick, D snare, F#/G#/A# hi-hats, C# crash,
- * D# ride), with the floor toms on F and G and the rack toms on A and B.
+ * General MIDI's drum octave (C kick, D snare, F#/G# hi-hat, A# open hi-hat,
+ * C# crash, D# ride), with the floor toms on F and G and the rack toms on A and B.
  */
 export const PIANO_LAYOUT: readonly Lane[] = [
   'kick',
@@ -61,12 +62,12 @@ export const PIANO_LAYOUT: readonly Lane[] = [
   'tomLo',
   'hh',
   'tomHi',
-  'hh',
+  'hhOpen',
   'tomHi',
 ];
 
 /** each drum's first key in the octave: the one printed on the drawn kit */
-const PIANO_HOME: Record<Lane, number> = { kick: 0, crash: 1, snare: 2, tomLo: 5, hh: 6, tomHi: 9 };
+const PIANO_HOME: Record<Lane, number> = { kick: 0, crash: 1, snare: 2, tomLo: 5, hh: 6, tomHi: 9, hhOpen: 10 };
 
 /** the key (0 = C .. 11 = B) to show for a drum: its usual key if it still plays it, else the first that does */
 export function pianoKeyFor(lane: Lane, layout: readonly Lane[]): number | null {

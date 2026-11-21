@@ -30,6 +30,7 @@
   --kick: #f0703f;
   --snare: #e9b949;
   --hh: #56bee3;
+  --hhopen: #a8d64f;
   --tomlo: #a08ceb;
   --tomhi: #e77bb0;
   --crash: #4cc08e;
@@ -949,6 +950,10 @@ input[type='range'] {
   stroke: var(--c);
   stroke-opacity: calc(0.34 + var(--cue) * 0.66);
   stroke-width: calc(2px + var(--cue) * 3.5px);
+}
+/* the open hi-hat's ring floats above the hat: shown only as its note nears, on hover, or while assigning */
+.kp-ring-ghost {
+  stroke-opacity: var(--cue, 0);
 }
 .kp:hover .kp-ring {
   stroke-opacity: calc(0.62 + var(--cue) * 0.38);
