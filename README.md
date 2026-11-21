@@ -20,11 +20,14 @@ U (above J) for the open hi-hat.
 A drawn kit (hi-hat, snare, kick, high and low tom, crash) sits under the play
 chart and on the Kit page. The open hi-hat is its own instrument on the same
 stand: an open hit lifts the top cymbal and rings for most of a second, and the
-next closed hit chokes it, as on a real kit. It has its own chart row (lessons
-such as Disco Hats call for it); General MIDI note 46 plays it. Song charts have
-one hi-hat (the transcription can't tell open from closed), so an open hit
-also counts for a hi-hat note; an open-hat note needs the open hat. Each pad hit lights its drum, brighter for harder
-hits; a drum's ring glows as its next note comes up and flashes red on a miss.
+next closed hit chokes it, as on a real kit. Open and closed hats share the
+hi-hat's chart row, as in drum notation: a closed hat is a solid note, an open
+hat a hollow one with an "o" in it, and the row's label shows both notes with
+their keys when a lesson (such as Disco Hats) opens the hat. General MIDI note
+46 plays it. Song charts have one hi-hat (the transcription can't tell open
+from closed), so an open hit also counts for a hi-hat note; an open-hat note
+needs the open hat. Each pad hit lights its drum, brighter for harder hits; a
+drum's ring glows as its next note comes up and flashes red on a miss.
 On the Kit page, click a drum and hit a pad to assign it. Hide the kit from the
 play screen's settings panel.
 

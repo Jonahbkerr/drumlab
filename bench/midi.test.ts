@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LANE_KEY, MidiManager, PIANO_LAYOUT, laneHints } from '../src/engine/midi';
 import type { InputSource, MidiEvent } from '../src/engine/midi';
-import { plays } from '../src/engine/types';
+import { LANES, ROW_OF, ROW_ORDER, plays, rowsFor } from '../src/engine/types';
 import type { Lane } from '../src/engine/types';
 import { LESSONS } from '../src/content/lessons';
 
@@ -123,6 +123,15 @@ test('an open hat plays hi-hat notes; a closed hat does not play open-hat notes'
   assert.ok(!plays('hh', 'hhOpen'), 'an open-hat note needs the open hat');
   assert.ok(!plays('hhOpen', 'crash'));
   assert.ok(!plays('snare', 'kick'));
+});
+
+test('open and closed hats share the hi-hat row', () => {
+  const disco = LESSONS.find((l) => l.id === 'grv-disco');
+  assert.ok(disco);
+  assert.deepEqual(rowsFor(disco.notes), ['hh', 'snare', 'kick'], 'one hi-hat row, no open-hat row');
+  assert.deepEqual(rowsFor([{ lane: 'hhOpen' }]), ['hh'], 'open hats alone still get the hi-hat row');
+  assert.equal(ROW_OF.hhOpen, 'hh');
+  for (const l of LANES) assert.ok(ROW_ORDER.includes(ROW_OF[l]), `${l} has a row`);
 });
 
 test('Disco Hats opens the hat on the off-beats, never on top of a closed one', () => {

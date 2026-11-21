@@ -201,7 +201,7 @@ export default function PlayView({ lesson, song, initialMode, levels, level, onL
           </button>
           <div style={{ minWidth: 0 }}>
             <div className="name">{title}</div>
-            <div className="sub">{midiOk ? midiStatus.replace('MIDI: ', 'Kit connected · ') : 'Keyboard: D F J K L ;'}</div>
+            <div className="sub">{midiOk ? midiStatus.replace('MIDI: ', 'Kit connected · ') : 'Keyboard: D F J K L ; · U open hat'}</div>
           </div>
         </div>
 

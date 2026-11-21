@@ -1,10 +1,9 @@
 import { useMemo } from 'react';
 import { BeatGrid } from '../engine/chart/arrange';
 import type { SongChart } from '../engine/transcribe';
-import { LANE_LABEL } from '../engine/types';
+import { LANE_LABEL, rowsFor } from '../engine/types';
 import type { Lane } from '../engine/types';
 
-const ROWS: Lane[] = ['crash', 'hhOpen', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'];
 const BARS = 2;
 
 /** Two bars of the chart as a drum grid, starting at the first busy bar. */
@@ -45,7 +44,7 @@ export default function ChartPreview({ chart }: { chart: SongChart }) {
         break;
       }
     }
-    const rows = ROWS.filter((l) => used.has(l));
+    const rows = rowsFor(chart.notes);
     const at = grid.slotTime((down + start * 4) * 4);
     return { rows, bySlot, start, at };
   }, [chart]);
@@ -67,11 +66,14 @@ export default function ChartPreview({ chart }: { chart: SongChart }) {
             <span className="chart-preview-label">{LANE_LABEL[lane]}</span>
             {Array.from({ length: cells }, (_, i) => {
               const slot = view.start * 16 + i;
-              const on = view.bySlot.get(slot)?.has(lane) ?? false;
+              const here = view.bySlot.get(slot);
+              // the hi-hat row holds open hats too, hollow
+              const open = lane === 'hh' && (here?.has('hhOpen') ?? false);
+              const on = here?.has(lane) ?? false;
               const cls = ['cell', i % 4 === 0 ? 'beat' : '', i % 16 === 0 ? 'bar' : ''].join(' ');
               return (
                 <span key={i} className={cls}>
-                  {on && <i style={{ background: `var(--${lane.toLowerCase()})` }} />}
+                  {open ? <i className="open" /> : on && <i style={{ background: `var(--${lane.toLowerCase()})` }} />}
                 </span>
               );
             })}

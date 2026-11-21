@@ -23,6 +23,30 @@ export function plays(hit: Lane, note: Lane): boolean {
   return hit === note || (hit === 'hhOpen' && note === 'hh');
 }
 
+/** chart rows, top to bottom: cymbals above, kick below, like drum notation */
+export const ROW_ORDER: Lane[] = ['crash', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'];
+
+/**
+ * The chart row a drum's notes sit in. The open hat shares the hi-hat's row,
+ * drawn hollow, as drum notation writes open and closed hats on one line.
+ */
+export const ROW_OF: Record<Lane, Lane> = {
+  kick: 'kick',
+  snare: 'snare',
+  hh: 'hh',
+  hhOpen: 'hh',
+  tomLo: 'tomLo',
+  tomHi: 'tomHi',
+  crash: 'crash',
+};
+
+/** only the rows a lesson or song uses */
+export function rowsFor(notes: { lane: Lane }[]): Lane[] {
+  const used = new Set(notes.map((n) => ROW_OF[n.lane]));
+  const rows = ROW_ORDER.filter((l) => used.has(l));
+  return rows.length > 0 ? rows : ROW_ORDER;
+}
+
 /** t = beat position from bar 1 beat 1 (beat 0). Drums are hits, so no duration. */
 export interface Note {
   t: number;

@@ -1,6 +1,6 @@
 import { sharedAudio } from './audio';
 import type { Lane, Lesson, Note, Section } from './types';
-import { LANES, LANE_LABEL, plays } from './types';
+import { LANES, LANE_LABEL, ROW_OF, ROW_ORDER, plays, rowsFor } from './types';
 import { LANE_KEY } from './midi';
 import { GOOD_MS, JUDGE_SCORE, judgeDelta, starsForAccuracy } from './judge';
 import type { Judgement } from './judge';
@@ -56,20 +56,54 @@ const LANE_COLOR: Record<Lane, string> = {
   kick: '#f0703f',
   snare: '#e9b949',
   hh: '#56bee3',
-  hhOpen: '#a8d64f',
+  hhOpen: '#a2dbf0', // the hi-hat's own blue, lighter: same instrument, opened
   tomLo: '#a08ceb',
   tomHi: '#e77bb0',
   crash: '#4cc08e',
 };
 
-/** play-screen rows, top to bottom: cymbals above, kick below, like drum notation */
-const ROW_ORDER: Lane[] = ['crash', 'hhOpen', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'];
-
-/** only the lanes a lesson or song uses get a row */
-function rowsFor(notes: { lane: Lane }[]): Lane[] {
-  const used = new Set(notes.map((n) => n.lane));
-  const rows = ROW_ORDER.filter((l) => used.has(l));
-  return rows.length > 0 ? rows : ROW_ORDER;
+/**
+ * One note. Most are solid; an open hi-hat is hollow with an "o" in it, the
+ * way drum notation marks an open hat, so it stands apart from the closed
+ * hats in the same row. `missed` draws only the outline (in `color`).
+ */
+function drawNote(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  lane: Lane,
+  color: string,
+  missed = false,
+) {
+  if (lane !== 'hhOpen') {
+    ctx.beginPath();
+    ctx.roundRect(x - w / 2, y - h / 2, w, h, Math.min(4, w / 3));
+    if (missed) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+    return;
+  }
+  const lw = w >= 14 ? 2.5 : 1.5;
+  ctx.beginPath();
+  ctx.roundRect(x - w / 2 + lw / 2, y - h / 2 + lw / 2, w - lw, h - lw, Math.min(3.5, w / 3));
+  if (!missed) {
+    ctx.fillStyle = hexA(color, 0.14);
+    ctx.fill();
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lw;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, Math.max(2, Math.min(4.5, h * 0.2, w / 2 - lw - 1.5)), 0, Math.PI * 2);
+  ctx.lineWidth = lw >= 2.5 ? 2 : 1.5;
+  ctx.stroke();
 }
 
 const INK = {
@@ -201,10 +235,13 @@ export class GameEngine {
   private effects: HitEffect[] = [];
   /** lanes shown, top to bottom (only lanes the lesson or song uses) */
   private rows: Lane[] = ROW_ORDER;
+  /** the chart has open-hat notes: the hi-hat row's header shows both of its notes and keys */
+  private openHats = false;
   private geo: Geo | null = null;
   private effectSeed = 1;
   /** last combo milestone shown (every 10) */
   private comboShown = 0;
+  /** last hit time per chart row */
   private flashTimes: Partial<Record<Lane, number>> = {};
 
   onHud: (h: Hud) => void = () => {};
@@ -419,6 +456,7 @@ export class GameEngine {
       : [...lesson.notes];
     this.notes.sort((a, b) => a.t - b.t);
     this.rows = rowsFor(lesson.notes);
+    this.openHats = lesson.notes.some((nn) => nn.lane === 'hhOpen');
     this.resetRun();
   }
 
@@ -446,6 +484,7 @@ export class GameEngine {
       : [...chart.notes];
     this.notes.sort((a, b) => a.t - b.t);
     this.rows = rowsFor(chart.notes);
+    this.openHats = chart.notes.some((nn) => nn.lane === 'hhOpen');
     this.resetRun();
   }
 
@@ -599,7 +638,7 @@ export class GameEngine {
     const now = this.now() - queued;
     // the pad sound plays right now on the audio clock (now() is the song clock)
     this.audio.hit(lane, this.audio.time(), vel);
-    this.flashTimes[lane] = now;
+    this.flashTimes[ROW_OF[lane]] = now;
     this.onFlash(lane, vel);
 
     // the count-in hands over to play on the next frame; a hit on (or just
@@ -854,12 +893,6 @@ export class GameEngine {
 
   // ---------------------------------------------------------------- render
 
-  /** lane under a point on the canvas (CSS px), for clicking/tapping a row */
-  /** drums the current lesson or song uses */
-  lanesInUse(): Lane[] {
-    return this.rows;
-  }
-
   /**
    * How close each drum's next note is: 0 = half a beat or more away, 1 = due now.
    * Drives the drum kit's "this one next" glow. Fills and returns `out`.
@@ -894,6 +927,7 @@ export class GameEngine {
     return out;
   }
 
+  /** row under a point on the canvas (CSS px), for clicking/tapping a row; the hi-hat row plays the closed hat */
   laneAt(y: number): Lane | null {
     const g = this.geo;
     if (!g || y < g.top) return null;
@@ -988,10 +1022,10 @@ export class GameEngine {
       }
     }
 
-    // notes: solid, no glow; missed ones slide on past the line and fade
+    // notes: solid (an open hat hollow), no glow; missed ones slide on past the line and fade
     for (let i = 0; i < this.notes.length; i++) {
       const note = this.notes[i];
-      const row = rows.indexOf(note.lane);
+      const row = rows.indexOf(ROW_OF[note.lane]);
       if (row < 0) continue;
       const t = this.noteTime(i);
       const x = xAt(t);
@@ -1000,18 +1034,13 @@ export class GameEngine {
       const j = this.judged[i];
       if (j !== null && j !== 'miss') continue; // hit notes pop (drawEffects)
       const y = rowY(row);
-      ctx.beginPath();
-      ctx.roundRect(x - noteW / 2, y - noteH / 2, noteW, noteH, 4);
       if (j === 'miss') {
         const fade = 1 - (now - t) / 0.6;
         if (fade <= 0) continue;
-        ctx.strokeStyle = hexA(INK.bad, 0.8 * Math.min(1, fade));
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        drawNote(ctx, x, y, noteW, noteH, note.lane, hexA(INK.bad, 0.8 * Math.min(1, fade)), true);
         continue;
       }
-      ctx.fillStyle = LANE_COLOR[note.lane];
-      ctx.fill();
+      drawNote(ctx, x, y, noteW, noteH, note.lane, LANE_COLOR[note.lane]);
     }
 
     this.drawEffects(ctx, now, geo);
@@ -1039,7 +1068,19 @@ export class GameEngine {
       if (rowH > 44) {
         ctx.fillStyle = INK.text3;
         ctx.font = `500 11px ${MONO}`;
-        ctx.fillText(this.keyHints[lane], 16, y + 14);
+        if (lane === 'hh' && this.openHats) {
+          // one row, two hi-hats: the closed note and its key, then the open note and its key
+          let x = 16;
+          for (const l of ['hh', 'hhOpen'] as const) {
+            drawNote(ctx, x + 5, y + 10, 10, 14, l, LANE_COLOR[l]);
+            x += 14;
+            ctx.fillStyle = INK.text3;
+            ctx.fillText(this.keyHints[l], x, y + 14);
+            x += ctx.measureText(this.keyHints[l]).width + 10;
+          }
+        } else {
+          ctx.fillText(this.keyHints[lane], 16, y + 14);
+        }
       }
       ctx.fillStyle = INK.line;
       ctx.fillRect(0, Math.round(top + (i + 1) * rowH), headerW, 1);
@@ -1094,12 +1135,12 @@ export class GameEngine {
   private drawEffects(ctx: CanvasRenderingContext2D, now: number, g: Geo) {
     this.effects = this.effects.filter((e) => now - e.at < EFFECT_LIFE && now >= e.at - 0.05);
     const newest: Partial<Record<Lane, number>> = {};
-    for (const e of this.effects) newest[e.lane] = Math.max(newest[e.lane] ?? -Infinity, e.at);
+    for (const e of this.effects) newest[ROW_OF[e.lane]] = Math.max(newest[ROW_OF[e.lane]] ?? -Infinity, e.at);
     const noteH = Math.min(46, Math.max(14, g.rowH * 0.46));
     for (const e of this.effects) {
-      const row = g.rows.indexOf(e.lane);
+      const row = g.rows.indexOf(ROW_OF[e.lane]);
       if (row < 0) continue;
-      const showText = newest[e.lane] === e.at;
+      const showText = newest[ROW_OF[e.lane]] === e.at;
       const age = Math.max(0, now - e.at);
       const k = age / EFFECT_LIFE;
       const cy = g.top + g.rowH * (row + 0.5);
@@ -1138,10 +1179,7 @@ export class GameEngine {
       if (pop > 0) {
         const s = 1 + (1 - pop) * 0.5;
         ctx.globalAlpha = pop;
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.roundRect(g.hitX - 9 * s, cy - (noteH / 2) * s, 18 * s, noteH * s, 4 * s);
-        ctx.fill();
+        drawNote(ctx, g.hitX, cy, 18 * s, noteH * s, e.lane, '#ffffff');
         ctx.globalAlpha = 1;
       }
 

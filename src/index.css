@@ -30,7 +30,7 @@
   --kick: #f0703f;
   --snare: #e9b949;
   --hh: #56bee3;
-  --hhopen: #a8d64f;
+  --hhopen: #a2dbf0; /* the hi-hat's blue, lighter: same instrument, opened */
   --tomlo: #a08ceb;
   --tomhi: #e77bb0;
   --crash: #4cc08e;
@@ -760,6 +760,10 @@ input[type='range'] {
   width: 9px;
   height: 9px;
   border-radius: 2.5px;
+}
+.chart-preview .cell i.open {
+  box-sizing: border-box;
+  border: 2px solid var(--hhopen);
 }
 
 /* ───────────────────────────── kit ───────────────────────────── */

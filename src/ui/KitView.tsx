@@ -166,9 +166,10 @@ function KitView({ ref, labels, inUse, selected, onPad, compact, className }: Pr
       : undefined,
   });
 
+  // the open hat sits on the hi-hat's stand: its label just says "Open", above "Hi-Hat"
   const label = (lane: Lane, x: number, y: number) => (
     <text className="kp-name" x={x} y={y}>
-      {labels[lane].name}
+      {lane === 'hhOpen' ? 'Open' : labels[lane].name}
       {labels[lane].hint && (
         <tspan className="kp-hint" dx={compact ? 9 : 7}>
           {labels[lane].hint}
