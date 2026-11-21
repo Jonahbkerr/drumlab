@@ -1,7 +1,14 @@
 {
-  "name": "drumlab",
+  "name": "jam-like-a-legend",
   "private": true,
   "version": "0.0.0",
+  "description": "Jam Like a Legend: a drum trainer for electronic kits, with lessons and your own songs as playable drum charts",
+  "license": "MIT",
+  "author": "Attune LLC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jonahbkerr/jam-like-a-legend.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

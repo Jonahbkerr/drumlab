@@ -26,7 +26,7 @@ const ROWS: Lane[] = ['crash', 'hhOpen', 'hh', 'tomHi', 'snare', 'tomLo', 'kick'
 const KEY_FOR = LANE_KEY;
 
 const STATUS: Record<string, { text: string; tone: 'ok' | 'bad' | 'idle' }> = {
-  'no-midi': { text: 'This browser has no Web MIDI. Open DrumLab in Chrome or Edge.', tone: 'bad' },
+  'no-midi': { text: 'This browser has no Web MIDI. Open Jam Like a Legend in Chrome or Edge.', tone: 'bad' },
   'midi-denied': { text: 'MIDI access is blocked. Allow it to use your kit.', tone: 'bad' },
   'midi:none': { text: 'MIDI is on, but no kit or keyboard is connected. Plug it in over USB.', tone: 'idle' },
   'checking…': { text: 'Checking for MIDI devices…', tone: 'idle' },

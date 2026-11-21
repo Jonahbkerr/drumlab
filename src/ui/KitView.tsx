@@ -341,7 +341,7 @@ function KitView({ ref, labels, inUse, selected, onPad, compact, className }: Pr
       {/* high tom, mounted behind the kick */}
       <g {...pieceProps('tomHi', 'drum')}>{drum('tomHi', TH)}</g>
 
-      {/* kick: front head with the DrumLab mark */}
+      {/* kick: front head with the Jam Like a Legend mark */}
       <g {...pieceProps('kick', 'kick')}>
         <path className="kp-leg" d={`M${KK.cx - 62} ${KK.cy + 70} L${KK.cx - 88} ${FLOOR} M${KK.cx + 62} ${KK.cy + 70} L${KK.cx + 88} ${FLOOR}`} />
         <circle ref={reg('kick:halo')} className="kp-halo" filter={url('blur')} cx={KK.cx} cy={KK.cy} r={KK.r + 16} />

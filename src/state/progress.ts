@@ -15,6 +15,7 @@ export interface Progress {
   goal: { day: string; minutes: number };
 }
 
+// DrumLab was the project's first name: storage keys keep it so saved progress, songs and pad maps carry over
 const KEY = 'drumlab:v1';
 export const DAILY_GOAL_MIN = 5;
 

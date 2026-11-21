@@ -32,7 +32,7 @@ export default function Shell({ section, progress, onNav, children }: Props) {
       <header className="topbar">
         <div className="brand">
           <Mark />
-          DrumLab
+          <span className="brand-name">Jam Like a Legend</span>
         </div>
         <nav className="nav" aria-label="Main">
           {NAV.map((n) => (
@@ -61,6 +61,15 @@ export default function Shell({ section, progress, onNav, children }: Props) {
         </div>
       </header>
       <main className="page">{children}</main>
+      <footer className="site-foot">
+        <span>Jam Like a Legend is an Attune LLC product.</span>
+        <span>
+          Open source under the MIT license:{' '}
+          <a href="https://github.com/Jonahbkerr/jam-like-a-legend" target="_blank" rel="noreferrer">
+            source on GitHub
+          </a>
+        </span>
+      </footer>
     </>
   );
 }

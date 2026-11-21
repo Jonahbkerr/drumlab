@@ -42,7 +42,7 @@ export default function Icon({ name, size }: { name: IconName; size?: number }) 
   );
 }
 
-/** DrumLab mark: a drum head seen from above, struck off-centre */
+/** Jam Like a Legend mark: a drum head seen from above, struck off-centre */
 export function Mark() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">

@@ -1,4 +1,6 @@
-# DrumLab
+# Jam Like a Legend
+
+An [Attune LLC](#license) product, open source under the MIT license.
 
 A drum trainer for electronic kits: guided lessons (rudiments, grooves, fills),
 USB/MIDI kit input with per-pad mapping, and **your own songs as playable drum
@@ -12,6 +14,8 @@ difficulty levels.
 npm install
 npm run dev        # http://localhost:5173
 ```
+
+Needs [Node.js](https://nodejs.org) 20.19 or newer (`npm` comes with it).
 
 Plug the kit in over USB before opening the page (Chrome or Edge, which have
 Web MIDI). Kit setup maps pads to lanes; keyboard fallback is D F J K L ;, with
@@ -78,7 +82,7 @@ piano notes instead of D F J K L ;, until you press a computer key again.
      wasm is 6.9 MB gzipped, 3.3 MB more than the CPU-only one; fetched once,
      when a song is first imported).
      Threads need cross-origin isolation, which `vite.config.ts` turns on
-     (COOP same-origin, COEP credentialless); any host serving DrumLab needs
+     (COOP same-origin, COEP credentialless); any host serving Jam Like a Legend needs
      the same two headers.
    - Measured: on the test songs, kick 100, snare 98→99, hi-hat 96, crash
      95 (stem alone loses cymbals: crash 81). In In The End's verse the
@@ -152,16 +156,24 @@ per lane at ±50 ms:
 
 All six tempos are detected correctly; mean timing offset is −3 ms.
 
-## Model and license
+## License
 
-The drum model is **ADTOF** by Mickaël Zehren, Marco Alunno and Paolo
+Jam Like a Legend is an Attune LLC product. Its source code is open source
+under the [MIT license](LICENSE), copyright © 2026 Attune LLC.
+
+**The drum model is not MIT.** The drum model is **ADTOF** by Mickaël Zehren, Marco Alunno and Paolo
 Bientinesi ("High-Quality and Reproducible Automatic Drum Transcription from
 Crowdsourced Data", *Signals* 2023), via the PyTorch port by Xavier Riley
 (github.com/xavriley/ADTOF-pytorch). The weights are licensed
 **CC BY-NC-SA 4.0: non-commercial use only.** `public/models/*.onnx` are a
-format conversion of those weights and carry the same license. Before
-DrumLab is sold or used commercially, the model has to be replaced or
-licensed.
+format conversion of those weights and carry the same license
+(`public/models/README.md`). Because of that model, the app as shipped is for
+non-commercial use: before Jam Like a Legend is sold or used commercially, the
+model has to be replaced or licensed.
+
+The other third-party work the app uses (the Demucs separation model,
+SoundTouchJS, ONNX Runtime, React, the Geist fonts) is listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 To regenerate the ONNX files: clone the port, then
 
