@@ -17,19 +17,21 @@ Plug the kit in over USB before opening the page (Chrome or Edge, which have
 Web MIDI). Kit setup maps pads to lanes; keyboard fallback is D F J K L ;, with
 U (above J) for the open hi-hat.
 
-A drawn kit (hi-hat, snare, kick, high and low tom, crash) sits under the play
-chart and on the Kit page. The open hi-hat is its own instrument on the same
-stand: an open hit lifts the top cymbal and rings for most of a second, and the
-next closed hit chokes it, as on a real kit. Open and closed hats share the
+On the play screen each chart row's label draws its drum (hi-hat, snare, kick,
+high and low tom, crash), right beside the notes it plays: the drum lights in
+its row's colour when hit, its ring glows as its next note comes up, and it
+rings red on a miss. Click a row's drum to play it. The whole kit, drawn, is on
+the Kit page, and "Show the drum kit" in the play screen's settings puts it
+under the chart as well (off by default). The open hi-hat is its own
+instrument on the same stand: an open hit lifts the top cymbal and rings for
+most of a second, and the next closed hit chokes it, as on a real kit. Open and closed hats share the
 hi-hat's chart row, as in drum notation: a closed hat is a solid note, an open
 hat a hollow one with an "o" in it, and the row's label shows both notes with
 their keys when a lesson (such as Disco Hats) opens the hat. General MIDI note
 46 plays it. Song charts have one hi-hat (the transcription can't tell open
 from closed), so an open hit also counts for a hi-hat note; an open-hat note
-needs the open hat. Each pad hit lights its drum, brighter for harder hits; a
-drum's ring glows as its next note comes up and flashes red on a miss.
-On the Kit page, click a drum and hit a pad to assign it. Hide the kit from the
-play screen's settings panel.
+needs the open hat. Each pad hit lights its drum, brighter for harder hits.
+On the Kit page, click a drum and hit a pad to assign it.
 
 A USB piano keyboard plays the drums too, the same way in every octave:
 

@@ -1,6 +1,8 @@
 import { sharedAudio } from './audio';
 import type { Lane, Lesson, Note, Section } from './types';
 import { LANES, LANE_LABEL, ROW_OF, ROW_ORDER, plays, rowsFor } from './types';
+import { DRUM_ASPECT, drawRowDrum } from './rowDrum';
+import type { DrumState } from './rowDrum';
 import { LANE_KEY } from './midi';
 import { GOOD_MS, JUDGE_SCORE, judgeDelta, starsForAccuracy } from './judge';
 import type { Judgement } from './judge';
@@ -243,6 +245,13 @@ export class GameEngine {
   private comboShown = 0;
   /** last hit time per chart row */
   private flashTimes: Partial<Record<Lane, number>> = {};
+  /** last hit per drum (game clock) and how hard: the row labels' drawn drums */
+  private hitAt: Partial<Record<Lane, { at: number; vel: number }>> = {};
+  /** last miss per chart row */
+  private missAt: Partial<Record<Lane, number>> = {};
+  private cueBuf = Object.fromEntries(LANES.map((l) => [l, 0])) as Record<Lane, number>;
+  /** the row drums move when hit, unless the system asks for reduced motion */
+  private motion = true;
 
   onHud: (h: Hud) => void = () => {};
   onResult: (r: RunResult) => void = () => {};
@@ -516,11 +525,14 @@ export class GameEngine {
     this.effects = [];
     this.comboShown = 0;
     this.flashTimes = {};
+    this.hitAt = {};
+    this.missAt = {};
   }
 
   attach(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
+    this.motion = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   }
 
   start() {
@@ -639,6 +651,7 @@ export class GameEngine {
     // the pad sound plays right now on the audio clock (now() is the song clock)
     this.audio.hit(lane, this.audio.time(), vel);
     this.flashTimes[ROW_OF[lane]] = now;
+    this.hitAt[lane] = { at: now, vel: Math.min(1, Math.max(0, vel)) };
     this.onFlash(lane, vel);
 
     // the count-in hands over to play on the next frame; a hit on (or just
@@ -712,6 +725,7 @@ export class GameEngine {
 
   private judgeMiss(i: number) {
     this.judged[i] = 'miss';
+    this.missAt[ROW_OF[this.notes[i].lane]] = this.now();
     this.misses++;
     this.laneMiss[this.notes[i].lane]++;
     this.combo = 0;
@@ -935,6 +949,43 @@ export class GameEngine {
     return g.rows[i] ?? null;
   }
 
+  /** what a row's drawn drum shows this frame */
+  private drumState(row: Lane, now: number, cues: Record<Lane, number>): DrumState {
+    // the hi-hat row's drum is both hats: whichever was hit last lights it
+    const lanes: Lane[] = row === 'hh' ? ['hh', 'hhOpen'] : [row];
+    let last: Lane | null = null;
+    for (const l of lanes) {
+      const hl = this.hitAt[l];
+      if (hl && (last === null || hl.at > this.hitAt[last]!.at)) last = l;
+    }
+    const hit = last ? this.hitAt[last]! : null;
+    const cueOpen = row === 'hh' ? cues.hhOpen : 0;
+    const openNext = cueOpen > cues[row];
+    // an open hit holds the top cymbal up while it rings, until a closed hit shuts it;
+    // an open-hat note coming up starts lifting it, like a foot easing off the pedal
+    let lift = 0;
+    if (row === 'hh') {
+      const o = this.hitAt.hhOpen;
+      const c = this.hitAt.hh;
+      if (o && (!c || o.at > c.at)) {
+        const age = now - o.at;
+        if (age >= 0 && age < 0.9) lift = Math.min(1, age / 0.03) * (age < 0.6 ? 1 : 1 - (age - 0.6) / 0.3);
+      }
+      if (openNext) lift = Math.max(lift, cueOpen ** 2 * 0.45);
+    }
+    const miss = this.missAt[row];
+    return {
+      color: LANE_COLOR[last ?? row],
+      hitAge: hit ? now - hit.at : Infinity,
+      vel: hit?.vel ?? 1,
+      cue: Math.max(cues[row], cueOpen),
+      cueColor: LANE_COLOR[openNext ? 'hhOpen' : row],
+      missAge: miss === undefined ? Infinity : now - miss,
+      lift,
+      motion: this.motion,
+    };
+  }
+
   private draw(now: number) {
     const canvas = this.canvas;
     const ctx = this.ctx;
@@ -1050,6 +1101,12 @@ export class GameEngine {
     ctx.fillRect(0, 0, headerW, h);
     ctx.fillStyle = INK.line;
     ctx.fillRect(headerW - 1, 0, 1, h);
+    // each row's label draws its drum when there is room, so the drums sit right
+    // beside their notes: lit when hit, glowing as their next note comes up
+    const cues = this.cueLevels(this.cueBuf);
+    const drumH = Math.min(rowH - 46, 70);
+    const drumW = Math.min(headerW - 34, drumH / DRUM_ASPECT);
+    const withDrum = drumW >= 56;
     for (let i = 0; i < rows.length; i++) {
       const lane = rows[i];
       const y = rowY(i);
@@ -1061,25 +1118,39 @@ export class GameEngine {
       }
       ctx.fillStyle = LANE_COLOR[lane];
       ctx.fillRect(0, top + i * rowH + 6, 3, rowH - 12);
-      ctx.textAlign = 'left';
+      // the drum, then its name, then its key (the hi-hat row: both notes with their keys)
+      let textX = 16;
+      let labelY = y + (rowH > 44 ? -2 : 4);
+      if (withDrum) {
+        const dh = drumW * DRUM_ASPECT;
+        const blockTop = y - (dh + 34) / 2;
+        drawRowDrum(ctx, lane, headerW / 2, blockTop + dh / 2, drumW, this.drumState(lane, now, cues));
+        textX = headerW / 2;
+        labelY = blockTop + dh + 17;
+      }
+      ctx.textAlign = withDrum ? 'center' : 'left';
       ctx.fillStyle = INK.text;
       ctx.font = `550 13px ${FONT}`;
-      ctx.fillText(LANE_LABEL[lane], 16, y + (rowH > 44 ? -2 : 4));
+      ctx.fillText(LANE_LABEL[lane], textX, labelY);
       if (rowH > 44) {
+        const hintY = labelY + 16;
         ctx.fillStyle = INK.text3;
         ctx.font = `500 11px ${MONO}`;
         if (lane === 'hh' && this.openHats) {
           // one row, two hi-hats: the closed note and its key, then the open note and its key
-          let x = 16;
-          for (const l of ['hh', 'hhOpen'] as const) {
-            drawNote(ctx, x + 5, y + 10, 10, 14, l, LANE_COLOR[l]);
+          const parts = (['hh', 'hhOpen'] as const).map((l) => ({ l, tw: ctx.measureText(this.keyHints[l]).width }));
+          const total = parts.reduce((s, p) => s + 14 + p.tw, 0) + 10;
+          let x = withDrum ? textX - total / 2 : textX;
+          ctx.textAlign = 'left';
+          for (const p of parts) {
+            drawNote(ctx, x + 5, hintY - 4, 10, 14, p.l, LANE_COLOR[p.l]);
             x += 14;
             ctx.fillStyle = INK.text3;
-            ctx.fillText(this.keyHints[l], x, y + 14);
-            x += ctx.measureText(this.keyHints[l]).width + 10;
+            ctx.fillText(this.keyHints[p.l], x, hintY);
+            x += p.tw + 10;
           }
         } else {
-          ctx.fillText(this.keyHints[lane], 16, y + 14);
+          ctx.fillText(this.keyHints[lane], textX, hintY);
         }
       }
       ctx.fillStyle = INK.line;

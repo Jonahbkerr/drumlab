@@ -33,9 +33,10 @@ const MIDI_LABEL: Record<string, string> = {
 const SHOW_KIT_KEY = 'drumlab:show-kit';
 const readShowKit = () => {
   try {
-    return localStorage.getItem(SHOW_KIT_KEY) !== '0';
+    // the drums are drawn in the chart's row labels; the full kit below is opt-in
+    return localStorage.getItem(SHOW_KIT_KEY) === '1';
   } catch {
-    return true;
+    return false;
   }
 };
 
