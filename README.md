@@ -8,27 +8,31 @@ charts**. Drop in an MP3 and the drum part is transcribed in the browser:
 kick, snare, hi-hat, toms and cymbals, on the song's own beat, at up to five
 difficulty levels.
 
-![The play screen during a song: a row for each drum, notes moving toward the hit line, and accuracy, streak and score at the top](docs/screenshots/play.png)
-
 ## What it does
 
-- **Play along.** Each drum has its own row, and its notes move toward a hit
-  line. Hit the pad as a note arrives and the hit is graded, from Perfect down
-  to a miss. Accuracy, streak and score are at the top of the screen.
-- **Learn one skill at a time.** Nine short lessons cover rudiments, grooves
-  and fills. Perform mode earns up to three stars a lesson; Practice mode
-  slows anything down.
-- **Turn your own songs into drum charts.** Import an MP3, M4A, WAV or OGG
-  file and the drum part is written out for you, from a simple pulse up to the
-  full part. The audio never leaves your computer.
-- **Use the kit you have.** An electronic drum kit or a piano keyboard over
-  USB, or the computer keyboard. The Kit page shows which pad plays which
-  drum and lets you change it.
+**Play along.** Each drum has its own row, and its notes move toward a hit
+line. Hit the pad as a note arrives and the hit is graded, from Perfect down
+to a miss. Accuracy, streak and score are at the top of the screen.
 
-| Lessons | Your own songs | Your kit |
-|---|---|---|
-| [![The Learn page: lessons listed under Rudiments and Grooves, each with its tempo, difficulty and stars](docs/screenshots/learn.png)](docs/screenshots/learn.png) | [![The import preview: a track's detected tempo, its levels, and the first two bars of its drum chart](docs/screenshots/import.png)](docs/screenshots/import.png) | [![The Kit page: a drawn drum kit, a connected kit, and the list of pads with their MIDI notes](docs/screenshots/kit.png)](docs/screenshots/kit.png) |
-| Pick a lesson and play it at its own tempo. | A track right after import, with its tempo and chart. | Hit a pad and its drum lights up. |
+![The play screen during a song: a row for each drum, notes moving toward the hit line, and accuracy, streak and score at the top](docs/screenshots/play.png)
+
+**Learn one skill at a time.** Nine short lessons cover rudiments, grooves
+and fills. Perform mode earns up to three stars a lesson; Practice mode slows
+anything down.
+
+![The Learn page: lessons listed under Rudiments and Grooves, each with its tempo, difficulty and stars](docs/screenshots/learn.png)
+
+**Turn your own songs into drum charts.** Import an MP3, M4A, WAV or OGG file
+and the drum part is written out for you, from a simple pulse up to the full
+part. The audio never leaves your computer.
+
+![The import preview: a track's detected tempo, its levels, and the first two bars of its drum chart](docs/screenshots/import.png)
+
+**Use the kit you have.** An electronic drum kit or a piano keyboard over USB,
+or the computer keyboard. The Kit page shows which pad plays which drum and
+lets you change it.
+
+![The Kit page: a drawn drum kit, a connected kit, and the list of pads with their MIDI notes](docs/screenshots/kit.png)
 
 The track in these screenshots is one of the project's own synthetic test
 mixes (`bench/songs.ts`), and the kit is the test suite's simulated one.
